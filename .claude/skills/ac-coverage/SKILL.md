@@ -22,7 +22,8 @@ whether the diff implements it, then you explain the gaps.
    `--criteria-file <file>`; or tell the user the PR has no criteria to check.
 
 2. Read `verdicts[]` from the JSON. Each has `status` (`implemented | partial |
-   contradicted | not_implemented | no_evidence | unverifiable`), `coverage_score`
+   contradicted | not_implemented | no_evidence | unverifiable | pr_check_pass |
+   pr_check_fail`), `coverage_score`
    (0–2), `coverage_confidence`, `has_tests`, `contradicts`, `unverifiable`,
    `needs_review`, and `evidence[]` (`file`, `hunk_id`, `relevance`, `diff`).
 
@@ -35,6 +36,8 @@ whether the diff implements it, then you explain the gaps.
    - `no_evidence`: say nothing in the diff touches this; ask whether it is out of scope
      or forgotten.
    - `unverifiable`: say it needs a runtime/manual check and suggest how.
+   - `pr_check_fail`: the criterion was about the PR itself (e.g. "has unit tests") and
+     the file list does not satisfy it; say what is absent.
    - `implemented` but `has_tests` < 0.5: mention it has no test in the diff.
 
 4. Keep the raw numbers out of the prose except when they matter (a low confidence

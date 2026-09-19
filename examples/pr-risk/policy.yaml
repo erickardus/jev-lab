@@ -34,8 +34,9 @@ risk_points:
   high: 4
   critical: 14
 
-# A rule "fires" when Jev's probability is at least this.
-fire_threshold: 0.6
+# A rule "fires" when Jev's probability is at least this. Keep it at or above
+# the top of `uncertain_band`, so a near coin-flip is flagged, never counted.
+fire_threshold: 0.65
 # Probabilities inside this band are flagged as uncertain (near coin-flip).
 uncertain_band: [0.35, 0.65]
 # Base Score answers with confidence below this are flagged as uncertain.
@@ -141,12 +142,14 @@ rules:
     risk: high
     criteria:
       true: >-
-        Existing external callers or API clients would have to change to keep
-        working.
+        Existing external callers or API clients would have to change their
+        requests or calls to keep working.
       false: >-
-        Only internal functions change, or every caller of a renamed or
-        changed function is updated in the same diff, or the change is purely
-        additive (a new optional parameter or field) and old callers still work.
+        Only functions internal to this application change, even if other
+        modules in the same repository import them and are updated in the
+        same diff. A change in which users are allowed to call an endpoint is
+        authorization, not an interface change. A purely additive change (a
+        new optional parameter, field, or endpoint) does not count.
 
   - id: external-input-handling
     description: >-

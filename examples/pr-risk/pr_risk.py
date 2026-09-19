@@ -26,7 +26,7 @@ import asyncio
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -122,22 +122,32 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_policy(path: Path) -> Policy:
-    """Load a policy, resolving `extends:` so users only write their deltas.
+    """Load a policy, resolving `extends:` so users only write their deltas."""
+    raw, rule_dicts = _load_policy_dicts(path)
+    return Policy(raw=raw, rules=[r for r in _parse_rules(rule_dicts) if r.enabled], path=path)
 
-    Rules merge by `id` (child wins; `enabled: false` drops a rule). Every other
-    top-level key in the child replaces the parent's value wholesale.
+
+def _load_policy_dicts(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Return (top-level config, rule dicts) with `extends:` chains merged.
+
+    Rules merge by `id`: a child rule's fields override the parent rule's, so
+    `{id: touches-money, risk: critical}` re-grades a default rule and
+    `{id: logging-only, enabled: false}` drops one. Other top-level keys in
+    the child replace the parent's value wholesale.
     """
     data = _load_yaml(path)
     parent_ref = data.pop("extends", None)
-    if parent_ref:
-        parent = load_policy((path.parent / parent_ref).resolve())
-        merged = dict(parent.raw)
-        merged.update({k: v for k, v in data.items() if k != "rules"})
-        by_id = {r.id: r for r in parent.rules}
-        for r in _parse_rules(data.get("rules", [])):
-            by_id[r.id] = r
-        return Policy(raw=merged, rules=[r for r in by_id.values() if r.enabled], path=path)
-    return Policy(raw=data, rules=[r for r in _parse_rules(data.get("rules", [])) if r.enabled], path=path)
+    own_rules = data.pop("rules", []) or []
+    if not parent_ref:
+        return data, own_rules
+    parent_raw, parent_rules = _load_policy_dicts((path.parent / parent_ref).resolve())
+    merged = {**parent_raw, **data}
+    by_id = {r["id"]: dict(r) for r in parent_rules}
+    for r in own_rules:
+        if "id" not in r:
+            raise ValueError(f"rule needs an `id`: {r}")
+        by_id[r["id"]] = {**by_id.get(r["id"], {}), **r}
+    return merged, list(by_id.values())
 
 
 def _parse_rules(items: list[dict[str, Any]]) -> list[Rule]:
@@ -412,6 +422,7 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
         # multi-file chunks use the localisation pass, falling back to the
         # chunk's files if no single file reaches the threshold on its own.
         where: list[str] = []
+        attribution = "pr" if rule.aggregate == "min" else "file"
         per_file = localization.get(rule.id, {})
         for c in chunks:
             if per_chunk[c.id] < fire:
@@ -420,7 +431,12 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
                 where.append(c.files[0].path)
                 continue
             hits = [f.path for f in c.files if per_file.get(f.path, 0.0) >= fire]
-            where.extend(hits or [f.path for f in c.files])
+            if not hits:
+                # The rule fired on the files together but on none alone:
+                # report the whole chunk and say so.
+                attribution = "chunk" if attribution == "file" else attribution
+                hits = [f.path for f in c.files]
+            where.extend(hits)
         uncertain = lo <= prob <= hi
         row = {
             "id": rule.id,
@@ -433,6 +449,7 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
             "aggregate": rule.aggregate,
             "per_chunk": {k: round(v, 3) for k, v in per_chunk.items()},
             "files": where,
+            "attribution": attribution,
             "per_file": {k: round(v, 3) for k, v in per_file.items()},
             "description": rule.description,
         }
@@ -445,7 +462,7 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
                     "id": rule.id,
                     "points": points,
                     "reason": f"rule `{rule.id}` ({rule.risk}) {verb} at p={prob:.2f}"
-                    + (f" in {', '.join(where[:3])}" if where and points > 0 else ""),
+                    + (f" in {'chunk ' if attribution == 'chunk' else ''}{', '.join(where[:3])}" if where and points > 0 else ""),
                     "uncertain": uncertain,
                 }
             )
@@ -596,6 +613,8 @@ def print_report(result: dict[str, Any]) -> None:
         if row["uncertain"]:
             mark += "?"
         where = ", ".join(row["files"][:3]) + (" ..." if len(row["files"]) > 3 else "")
+        if row["fired"] and row["attribution"] == "chunk":
+            where = f"(chunk-level) {where}"
         print(f"  {row['id']:<24} {row['risk']:<9} {row['probability']:>5.2f}  {mark:<6} {row['points']:>6.1f}  {where}")
 
     print("\nCode-computed facts")
