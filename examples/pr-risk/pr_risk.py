@@ -343,23 +343,56 @@ def build_chunks(pr: PullRequest) -> list[Chunk]:
 # =========================================================================== model calls
 
 
-async def ask_chunk(client: AsyncTypeSafeClient, chunk: Chunk, policy: Policy, sem: asyncio.Semaphore, model: str | None):
-    questions = {f"rule:{r.id}": r.question() for r in policy.rules}
-    questions.update(BASE_QUESTIONS)
+def rule_questions(rules: list[Rule]) -> dict[str, Noul]:
+    return {f"rule:{r.id}": r.question() for r in rules}
+
+
+async def _ask(client: AsyncTypeSafeClient, state: dict[str, Any], questions: dict, sem: asyncio.Semaphore, model: str | None):
     async with sem:
-        return await client.system_one(state=chunk.state, questions=questions, model=model)
+        return await client.system_one(state=state, questions=questions, model=model)
 
 
-async def evaluate(chunks: list[Chunk], policy: Policy, model: str | None):
+async def run_model(chunks: list[Chunk], policy: Policy, model: str | None, localize: bool):
+    """Two passes: every question on every chunk, then localise fired rules.
+
+    Pass 1 sends ALL rule Nouls plus the base questions for each chunk in one
+    request (independent questions run in parallel server-side). Pass 2 re-asks
+    only the rules that fired, one request per file of each multi-file chunk
+    that fired, so the report can point at the file rather than the chunk.
+    Smaller state per request also matches the guidance that irrelevant detail
+    degrades accuracy.
+    """
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
+    fire = float(policy.raw.get("fire_threshold", 0.6))
     async with AsyncTypeSafeClient() as client:
-        return await asyncio.gather(*(ask_chunk(client, c, policy, sem, model) for c in chunks))
+        questions = {**rule_questions(policy.rules), **BASE_QUESTIONS}
+        responses = await asyncio.gather(*(_ask(client, c.state, questions, sem, model) for c in chunks))
+
+        localization: dict[str, dict[str, float]] = {}  # rule id -> {path: p}
+        if not localize:
+            return responses, localization, 0
+        jobs: list[tuple[str, list[Rule], dict[str, Any]]] = []
+        for chunk, resp in zip(chunks, responses):
+            if len(chunk.files) < 2:
+                continue
+            fired = [r for r in policy.rules if resp.nouls[f"rule:{r.id}"].noul >= fire and policy.rule_points(r) > 0]
+            if not fired:
+                continue
+            for f, entry in zip(chunk.files, chunk.state["files"]):
+                state = {"title": chunk.state["title"], "body": chunk.state["body"], "files": [entry]}
+                jobs.append((f.path, fired, state))
+        results = await asyncio.gather(*(_ask(client, st, rule_questions(rs), sem, model) for _, rs, st in jobs))
+        for (path, rules, _), resp in zip(jobs, results):
+            for r in rules:
+                localization.setdefault(r.id, {})[path] = resp.nouls[f"rule:{r.id}"].noul
+        return responses, localization, len(results)
 
 
 # =========================================================================== composite scoring
 
 
-def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list) -> dict[str, Any]:
+def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list, localization: dict[str, dict[str, float]] | None = None, extra_requests: int = 0) -> dict[str, Any]:
+    localization = localization or {}
     facts = compute_facts(pr, policy)
     fire = float(policy.raw.get("fire_threshold", 0.6))
     lo, hi = policy.raw.get("uncertain_band", [0.35, 0.65])
@@ -375,8 +408,19 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
         prob = agg(per_chunk.values())
         fired = prob >= fire
         points = policy.rule_points(rule) if fired else 0.0
-        # Files that triggered the rule: chunks whose own probability fired.
-        where = [f.path for c in chunks if per_chunk[c.id] >= fire for f in c.files]
+        # Files that triggered the rule. Single-file chunks are exact; for
+        # multi-file chunks use the localisation pass, falling back to the
+        # chunk's files if no single file reaches the threshold on its own.
+        where: list[str] = []
+        per_file = localization.get(rule.id, {})
+        for c in chunks:
+            if per_chunk[c.id] < fire:
+                continue
+            if len(c.files) == 1:
+                where.append(c.files[0].path)
+                continue
+            hits = [f.path for f in c.files if per_file.get(f.path, 0.0) >= fire]
+            where.extend(hits or [f.path for f in c.files])
         uncertain = lo <= prob <= hi
         row = {
             "id": rule.id,
@@ -389,6 +433,7 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
             "aggregate": rule.aggregate,
             "per_chunk": {k: round(v, 3) for k, v in per_chunk.items()},
             "files": where,
+            "per_file": {k: round(v, 3) for k, v in per_file.items()},
             "description": rule.description,
         }
         rule_rows.append(row)
@@ -513,7 +558,7 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
         "chunks": [{"id": c.id, "files": [f.path for f in c.files], "est_tokens": c.tokens, "truncated": c.truncated} for c in chunks],
         "truncated": truncated,
         "usage": {
-            "requests": len(responses),
+            "requests": len(responses) + extra_requests,
             "input_tokens": sum(r.usage.input_tokens for r in responses),
             "output_tokens": sum(r.usage.output_tokens for r in responses),
         },
@@ -579,7 +624,7 @@ def print_report(result: dict[str, Any]) -> None:
     print(f"  {'=':>6}  {result['score']:.2f} -> {result['level'].upper()}")
 
     ch = result["chunks"]
-    print(f"\n{len(ch)} request(s), ~{sum(c['est_tokens'] for c in ch)} est. state tokens, "
+    print(f"\n{result['usage']['requests']} request(s) over {len(ch)} chunk(s), ~{sum(c['est_tokens'] for c in ch)} est. state tokens, "
           f"{result['usage']['input_tokens']} input tokens billed"
           + ("  [TRUNCATED diffs]" if result["truncated"] else ""))
 
@@ -596,6 +641,7 @@ def main() -> None:
     ap.add_argument("--policy", default=str(DEFAULT_POLICY), help="policy YAML (default: examples/pr-risk/policy.yaml)")
     ap.add_argument("--model", default=None, help="Jev model id (default: policy `model` or jev-latest)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--no-localize", action="store_true", help="skip the per-file pass that attributes fired rules to files")
     ap.add_argument("--dump-state", action="store_true", help="print the per-chunk state sent to Jev (debugging)")
     args = ap.parse_args()
 
@@ -612,8 +658,8 @@ def main() -> None:
             print(f"--- {c.id} (~{c.tokens} tokens) ---", file=sys.stderr)
             print(json.dumps(c.state, indent=2), file=sys.stderr)
 
-    responses = asyncio.run(evaluate(chunks, policy, model))
-    result = assess(pr, policy, chunks, responses)
+    responses, localization, extra = asyncio.run(run_model(chunks, policy, model, localize=not args.no_localize))
+    result = assess(pr, policy, chunks, responses, localization, extra)
 
     if args.json:
         print(json.dumps(result, indent=2))
