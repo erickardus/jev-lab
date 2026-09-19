@@ -1,0 +1,163 @@
+diff --git a/app/auth/middleware.py b/app/auth/middleware.py
+index 4c5d6e7..8f9a0b1 100644
+--- a/app/auth/middleware.py
++++ b/app/auth/middleware.py
+@@ -1,34 +1,58 @@
+ """Resolve the current principal for each request."""
+ 
+ from __future__ import annotations
+ 
+ from functools import wraps
+ 
+-from flask import g, request, abort
++from flask import g, request, abort
++from werkzeug.security import check_password_hash
+ 
+ from app.auth.session import load_session
+-from app.auth.models import AnonymousUser
++from app.auth.models import AnonymousUser, ApiToken, User
++from app.db import db
+ 
+ 
+-def load_current_user() -> None:
+-    sess = load_session(request.cookies.get("sid"))
+-    g.user = sess.user if sess else AnonymousUser()
++def _principal_from_token(header: str | None) -> User | None:
++    if not header or not header.startswith("Bearer "):
++        return None
++    raw = header.removeprefix("Bearer ").strip()
++    prefix, _, secret = raw.partition(".")
++    token = db.session.query(ApiToken).filter_by(prefix=prefix, revoked_at=None).one_or_none()
++    if token is None or not check_password_hash(token.secret_hash, secret):
++        return None
++    return token.owner
++
++
++def resolve_principal() -> None:
++    """Populate g.user from a cookie session or a bearer token, in that order."""
++    sess = load_session(request.cookies.get("sid"))
++    if sess is not None:
++        g.user = sess.user
++        g.auth_source = "session"
++        return
++    user = _principal_from_token(request.headers.get("Authorization"))
++    if user is not None:
++        g.user = user
++        g.auth_source = "token"
++        return
++    g.user = AnonymousUser()
++    g.auth_source = None
+ 
+ 
+ def require_role(*roles: str):
+     def decorator(fn):
+         @wraps(fn)
+         def wrapper(*args, **kwargs):
+-            user = getattr(g, "user", None) or AnonymousUser()
+-            if user.role not in roles and not user.is_admin:
++            user = getattr(g, "user", None)
++            if user is None or user.is_anonymous:
++                abort(401)
++            if user.role not in roles:
+                 abort(403)
+             return fn(*args, **kwargs)
+         return wrapper
+     return decorator
+diff --git a/app/auth/models.py b/app/auth/models.py
+index 2b3c4d5..6e7f8a9 100644
+--- a/app/auth/models.py
++++ b/app/auth/models.py
+@@ -40,3 +40,17 @@ class AnonymousUser:
+     role = "anonymous"
+     is_admin = False
+     is_anonymous = True
++
++
++class ApiToken(db.Model):
++    __tablename__ = "api_tokens"
++
++    id = db.Column(db.Integer, primary_key=True)
++    prefix = db.Column(db.String(12), unique=True, nullable=False, index=True)
++    secret_hash = db.Column(db.String(255), nullable=False)
++    owner_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
++    created_at = db.Column(db.DateTime, server_default=db.func.now())
++    revoked_at = db.Column(db.DateTime, nullable=True)
++
++    owner = db.relationship("User", back_populates="api_tokens")
+diff --git a/migrations/versions/0042_api_tokens.py b/migrations/versions/0042_api_tokens.py
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/migrations/versions/0042_api_tokens.py
+@@ -0,0 +1,26 @@
++"""add api_tokens table
++
++Revision ID: 0042
++Revises: 0041
++"""
++import sqlalchemy as sa
++from alembic import op
++
++revision = "0042"
++down_revision = "0041"
++
++
++def upgrade() -> None:
++    op.create_table(
++        "api_tokens",
++        sa.Column("id", sa.Integer(), primary_key=True),
++        sa.Column("prefix", sa.String(12), nullable=False),
++        sa.Column("secret_hash", sa.String(255), nullable=False),
++        sa.Column("owner_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
++        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
++        sa.Column("revoked_at", sa.DateTime(), nullable=True),
++    )
++    op.create_index("ix_api_tokens_prefix", "api_tokens", ["prefix"], unique=True)
++
++
++def downgrade() -> None:
++    op.drop_table("api_tokens")
+diff --git a/app/__init__.py b/app/__init__.py
+index 1f2e3d4..5c6b7a8 100644
+--- a/app/__init__.py
++++ b/app/__init__.py
+@@ -12,7 +12,7 @@ from app.api import api_bp
+-from app.auth.middleware import load_current_user
++from app.auth.middleware import resolve_principal
+ 
+ 
+ def create_app() -> Flask:
+@@ -24,6 +24,6 @@ def create_app() -> Flask:
+     app.register_blueprint(api_bp, url_prefix="/api")
+-    app.before_request(load_current_user)
++    app.before_request(resolve_principal)
+     return app
+diff --git a/tests/auth/test_middleware.py b/tests/auth/test_middleware.py
+index 7d8e9f0..1a2b3c4 100644
+--- a/tests/auth/test_middleware.py
++++ b/tests/auth/test_middleware.py
+@@ -30,3 +30,25 @@ def test_session_cookie_sets_user(client, session_cookie):
+     resp = client.get("/api/me", headers={"Cookie": session_cookie})
+     assert resp.status_code == 200
++
++
++def test_bearer_token_sets_user(client, api_token):
++    resp = client.get("/api/me", headers={"Authorization": f"Bearer {api_token.raw}"})
++    assert resp.status_code == 200
++    assert resp.json["auth_source"] == "token"
++
++
++def test_revoked_token_is_anonymous(client, revoked_token):
++    resp = client.get("/api/me", headers={"Authorization": f"Bearer {revoked_token.raw}"})
++    assert resp.status_code == 401
++
++
++def test_require_role_rejects_anonymous(client):
++    resp = client.get("/api/admin/users")
++    assert resp.status_code == 401
++
++
++def test_require_role_no_admin_fallthrough(client, admin_session):
++    # admins used to bypass role checks; now they need the role explicitly
++    resp = client.get("/api/billing/reports", headers={"Cookie": admin_session})
++    assert resp.status_code == 403

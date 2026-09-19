@@ -4,7 +4,7 @@ Jev doesn't generate text. You send it *state* plus typed *questions*, and it
 returns typed answers with probabilities. Your code owns the workflow; Jev
 supplies the semantic judgments code can't make on its own.
 
-Run:  uv run triage.py   (reads TYPESAFE_API_KEY from .env)
+Run:  uv run examples/triage/triage.py   (reads TYPESAFE_API_KEY from .env)
 """
 
 from dotenv import load_dotenv

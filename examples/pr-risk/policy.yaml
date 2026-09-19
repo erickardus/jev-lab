@@ -1,0 +1,245 @@
+# PR risk policy.
+#
+# Two kinds of rules live here:
+#   * `rules` are written in natural language and evaluated by Jev, one Noul
+#     question per rule. Jev reads literally, so each description states ONE
+#     condition in plain words, and optional `criteria` pin down boundary
+#     cases (what does and does not count).
+#   * `dependency_rules` and `size_rules` are evaluated in CODE. Version
+#     comparison, counting lines and files, and ratios are arithmetic, which
+#     Jev is bad at and code is perfect at.
+#
+# Scoring is also code: every fired rule contributes `weight * risk_points[risk]`
+# (or its explicit `points`), dependency bumps and size add their points, and
+# two base Score questions add a little. The total maps to a level through
+# `thresholds`. Everything is printed, so you can see why a PR got its level.
+#
+# Customising: copy this file, set `extends: policy.yaml` at the top, and list
+# only the rules you add or override (same `id` overrides; `enabled: false`
+# drops a default rule). Top-level scalars/maps you set replace the defaults.
+
+version: 1
+model: jev-latest
+
+# Composite score -> level. A score below `medium` is low.
+thresholds:
+  medium: 2
+  high: 4
+  critical: 12
+
+# Points a fired rule contributes, by its `risk` label (times `weight`).
+risk_points:
+  low: 0
+  medium: 2
+  high: 4
+  critical: 12
+
+# A rule "fires" when Jev's probability is at least this.
+fire_threshold: 0.6
+# Probabilities inside this band are flagged as uncertain (near coin-flip).
+uncertain_band: [0.35, 0.65]
+# Base Score answers with confidence below this are flagged as uncertain.
+low_confidence: 0.5
+
+# Base judgments Jev makes on every PR, regardless of custom rules. Both are
+# normalised to 0..1 in code and multiplied by these weights.
+base:
+  blast_radius_weight: 1.0
+  behavior_change_weight: 1.0
+  # Points subtracted when Jev sees tests that exercise the changed code.
+  tests_cover_change_credit: 1.0
+
+# Natural-language rules. Each becomes one Noul question:
+#   "Is `statement` true of the code changes in `files`?"
+# Fields: id, description (the statement), risk (low|medium|high|critical),
+# weight (default 1), points (optional explicit override, may be negative),
+# criteria.true / criteria.false (optional boundary cases),
+# aggregate (max|min, default max): how per-chunk probabilities are combined
+# when a large PR is split. Rules phrased as "every changed line ..." must use
+# `min`, because they are only true of the PR if true of every chunk.
+rules:
+  - id: touches-money
+    description: >-
+      The change adds, removes, or edits code that charges, refunds, invoices,
+      prices, taxes, or otherwise computes or records a monetary amount, or
+      that calls a payment provider such as Stripe, Braintree, Adyen, or PayPal.
+    risk: high
+    criteria:
+      true: >-
+        At least one added (+) or removed (-) line is inside logic that handles
+        money or calls a payment provider API.
+      false: >-
+        No changed line handles money. Changing only the display text of a
+        price label, or bumping a dependency version in a manifest, does not
+        count.
+
+  - id: auth-or-permissions
+    description: >-
+      The change adds, removes, or edits code that authenticates users, checks
+      roles or permissions, issues or validates sessions or tokens, or decides
+      whether a caller may access a resource.
+    risk: high
+    criteria:
+      true: >-
+        A changed line is inside login, logout, password, token, session,
+        role, permission, or access-control logic.
+      false: >-
+        No changed line affects who is authenticated or what they may access.
+        Passing an existing user object through unchanged does not count.
+
+  - id: data-migration
+    description: >-
+      The change adds or edits a database schema migration, or changes how
+      stored records are read from or written to a database (SQL queries, ORM
+      models or fields, or serialization of persisted data).
+    risk: high
+    criteria:
+      true: >-
+        A migration file is added or edited, a model or table definition
+        changes, or a query that reads or writes persisted data changes.
+      false: >-
+        No changed line touches persistence. In-memory data structures and
+        API request/response objects do not count.
+
+  - id: data-deletion
+    description: >-
+      The change adds or edits code that deletes, truncates, or bulk-updates
+      stored data, or drops a table or column.
+    risk: high
+
+  - id: hardcoded-secret
+    description: >-
+      The diff adds a literal secret value written directly into code or
+      config: an API key, password, private key, or access token.
+    risk: critical
+    criteria:
+      true: >-
+        An added (+) line contains an actual secret string, such as
+        "sk_live_...", a password value, or a private key block.
+      false: >-
+        Secrets are read from environment variables or a secrets manager,
+        or the value is an obvious placeholder like "changeme" or "<your key>".
+
+  - id: public-api-contract
+    description: >-
+      The change modifies a public interface used by other code or clients:
+      renames or removes an exported function, class, or endpoint; changes the
+      parameters or return type of a public function; or changes the fields
+      of a request or response payload or serialized format.
+    risk: high
+    criteria:
+      true: >-
+        Existing callers or API clients would have to change to keep working.
+      false: >-
+        Only internal or private code changes, or the change is purely
+        additive (a new optional parameter or field) and old callers still work.
+
+  - id: external-input-handling
+    description: >-
+      The change adds or edits code that parses or validates input arriving
+      from outside the system: HTTP request bodies, query parameters, headers,
+      file uploads, or webhook payloads.
+    risk: medium
+
+  - id: error-handling-removed
+    description: >-
+      The change removes or weakens error handling: deletes a try/except or
+      try/catch block, removes a validation or null check, swallows an
+      exception without handling it, or removes a retry or timeout.
+    risk: medium
+    criteria:
+      true: >-
+        A removed (-) line was a guard, check, or exception handler and no
+        equivalent added (+) line replaces it.
+      false: >-
+        Error handling is unchanged, added, or replaced by something
+        equivalent or stricter.
+
+  - id: concurrency
+    description: >-
+      The change adds or edits code that uses locks, mutexes, threads, worker
+      pools, background jobs, or shared mutable state accessed from more than
+      one execution context.
+    risk: medium
+    criteria:
+      true: >-
+        A changed line creates, acquires, or coordinates concurrent execution
+        or protects shared state.
+      false: >-
+        Ordinary sequential code, or async/await used only to call an API
+        without any shared state.
+
+  - id: infra-or-ci
+    description: >-
+      The change edits infrastructure or deployment configuration: a
+      Dockerfile, Kubernetes, Terraform, or CloudFormation file, a CI/CD
+      pipeline definition, or a deployment script.
+    risk: medium
+
+  - id: tests-weakened
+    description: >-
+      The change deletes test cases, marks tests as skipped or expected to
+      fail, or loosens an assertion so a test accepts more outcomes than before.
+    risk: medium
+
+  - id: deletes-code
+    description: >-
+      The change deletes a whole source file or removes a top-level function,
+      class, or module definition.
+    risk: medium
+    criteria:
+      true: >-
+        A file is deleted, or a `def`/`function`/`class` (or equivalent)
+        definition is removed and not re-added under the same name.
+      false: >-
+        Only lines inside a body are removed, or a definition is moved or
+        renamed within the same diff.
+
+  # Mitigating rules. `min` aggregate: true of the PR only if true of every chunk.
+  - id: copy-only
+    description: >-
+      Every added or removed line in the diff changes only text shown to users
+      (string literals, labels, translations, placeholder or help text). No
+      condition, function call, data structure, or configuration value changes.
+    risk: low
+    aggregate: min
+    criteria:
+      true: >-
+        Each changed line differs from its counterpart only in human-readable
+        text content.
+      false: >-
+        At least one changed line alters logic, a key or identifier, a
+        number used in computation, or a configuration value.
+
+  - id: logging-only
+    description: >-
+      Every added or removed line in the diff only adds, removes, or edits a
+      logging, metrics, or tracing statement, without changing any other
+      behavior.
+    risk: low
+    aggregate: min
+
+  - id: feature-flag-guarded
+    description: >-
+      Every behavior change in the diff is wrapped in a feature flag, config
+      toggle, or experiment check so that it is inactive by default.
+    risk: low
+    aggregate: min
+    points: -1
+
+# Evaluated in code from dependency_changes(): the largest bump's risk counts.
+dependency_rules:
+  patch: low
+  minor: medium
+  major: high
+  new: medium
+  removed: medium
+  other: medium
+
+# Evaluated in code. A PR is `small` if under the small threshold, `medium`
+# if under the medium threshold, otherwise `large`; the larger of the two
+# categories (lines vs files) wins.
+size_rules:
+  lines_changed: { small: 50, medium: 300 }
+  files_changed: { small: 3, medium: 10 }
+  points: { small: 0, medium: 1, large: 2 }

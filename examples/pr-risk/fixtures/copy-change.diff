@@ -1,0 +1,48 @@
+diff --git a/src/components/checkout/CheckoutButton.tsx b/src/components/checkout/CheckoutButton.tsx
+index 1a2b3c4..5d6e7f8 100644
+--- a/src/components/checkout/CheckoutButton.tsx
++++ b/src/components/checkout/CheckoutButton.tsx
+@@ -14,9 +14,9 @@ export function CheckoutButton({ disabled, onClick }: Props) {
+       disabled={disabled}
+       onClick={onClick}
+       className="btn btn-primary w-full"
+-      aria-label="Submit order"
++      aria-label="Place your order"
+     >
+-      {t("checkout.submit", "Submit order")}
++      {t("checkout.submit", "Place your order")}
+     </button>
+   );
+ }
+diff --git a/src/components/cart/EmptyCart.tsx b/src/components/cart/EmptyCart.tsx
+index 9f8e7d6..0a1b2c3 100644
+--- a/src/components/cart/EmptyCart.tsx
++++ b/src/components/cart/EmptyCart.tsx
+@@ -6,8 +6,8 @@ export function EmptyCart() {
+   return (
+     <div className="empty-cart">
+-      <h2>{t("cart.empty.title", "Your cart is empty")}</h2>
+-      <p>{t("cart.empty.body", "Add items to your cart to continue.")}</p>
++      <h2>{t("cart.empty.title", "Nothing in your cart yet")}</h2>
++      <p>{t("cart.empty.body", "Browse the shop and add a few things you love.")}</p>
+       <Link to="/shop">{t("cart.empty.cta", "Continue shopping")}</Link>
+     </div>
+   );
+diff --git a/src/locales/es.json b/src/locales/es.json
+index 2c3d4e5..6f7a8b9 100644
+--- a/src/locales/es.json
++++ b/src/locales/es.json
+@@ -21,10 +21,10 @@
+   "checkout": {
+-    "submit": "Enviar pedido"
++    "submit": "Realizar pedido"
+   },
+   "cart": {
+     "empty": {
+-      "title": "Tu carrito está vacío",
+-      "body": "Agrega artículos a tu carrito para continuar.",
++      "title": "Aún no hay nada en tu carrito",
++      "body": "Explora la tienda y agrega algunas cosas que te gusten.",
+       "cta": "Seguir comprando"
+     }
+   }

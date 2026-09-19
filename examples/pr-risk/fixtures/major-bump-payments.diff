@@ -1,0 +1,81 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 5d2e0a1..9c4b7f3 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -8,9 +8,9 @@ requires-python = ">=3.11"
+ dependencies = [
+     "fastapi>=0.110.0",
+     "sqlalchemy>=2.0.29",
+-    "stripe>=7.4.0",
++    "stripe>=12.1.0",
+     "pydantic>=2.6.4",
+     "httpx>=0.27.0",
+ ]
+ 
+diff --git a/billing/charge.py b/billing/charge.py
+index 7a8c1e2..f0d3b9c 100644
+--- a/billing/charge.py
++++ b/billing/charge.py
+@@ -1,12 +1,14 @@
+ """Charge a customer for an invoice."""
+ 
+ from __future__ import annotations
+ 
+ import stripe
+ 
+ from billing.models import Invoice, Payment
++from billing.errors import InvalidAmount
+ from db import session_scope
+ 
+ stripe.api_key = settings.STRIPE_SECRET_KEY
++stripe.api_version = "2024-04-10"
+ 
+ 
+@@ -22,26 +24,36 @@ def _idempotency_key(invoice: Invoice) -> str:
+ 
+ def charge_customer(invoice: Invoice) -> Payment:
+     """Charge the invoice total to the customer's default payment method."""
+-    charge = stripe.Charge.create(
+-        amount=invoice.total_cents,
+-        currency=invoice.currency,
+-        customer=invoice.customer.stripe_id,
+-        description=f"Invoice {invoice.number}",
+-        idempotency_key=_idempotency_key(invoice),
+-    )
++    if invoice.total_cents <= 0:
++        raise InvalidAmount(f"invoice {invoice.number} has non-positive total {invoice.total_cents}")
++
++    intent = stripe.PaymentIntent.create(
++        amount=invoice.total_cents,
++        currency=invoice.currency,
++        customer=invoice.customer.stripe_id,
++        description=f"Invoice {invoice.number}",
++        automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
++        confirm=True,
++        off_session=True,
++        idempotency_key=_idempotency_key(invoice),
++    )
++    if intent.status != "succeeded":
++        raise PaymentFailed(invoice.number, intent.status)
++
+     with session_scope() as db:
+         payment = Payment(
+             invoice_id=invoice.id,
+-            provider_ref=charge.id,
+-            amount_cents=charge.amount,
+-            currency=charge.currency,
+-            status=charge.status,
++            provider_ref=intent.id,
++            amount_cents=intent.amount_received,
++            currency=intent.currency,
++            status=intent.status,
+         )
+         db.add(payment)
+     return payment
+ 
+ 
+ def refund_payment(payment: Payment, amount_cents: int | None = None) -> str:
+     """Refund a payment, fully or partially. Returns the provider refund id."""
+-    refund = stripe.Refund.create(charge=payment.provider_ref, amount=amount_cents)
++    refund = stripe.Refund.create(payment_intent=payment.provider_ref, amount=amount_cents)
+     return refund.id
