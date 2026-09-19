@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": [
+              "run",
+              "--project",
+              "${CLAUDE_PROJECT_DIR}",
+              "${CLAUDE_PROJECT_DIR}/examples/prompt-coach/prompt_coach.py"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

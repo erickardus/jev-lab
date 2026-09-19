@@ -103,6 +103,25 @@ near a threshold), not that the PR is dangerous.
 
 Claude Code skill: `/pr-risk <pr>`.
 
+### [`prompt-coach/`](examples/prompt-coach/) — grade the prompt before Claude sees it
+
+A Claude Code `UserPromptSubmit` hook. Jev scores each prompt (how specific is the ask,
+does it say what "done" looks like, does it name the code it means, does it lean on an
+unexplained "it") in ~200ms. Clear prompts pass silently; vague first messages are
+blocked with a targeted tip and a rewrite template; vague mid-session prompts get a
+one-line nudge and Claude is told to ask a clarifying question first.
+
+```
+| outcome  | q    | kind     | prompt                                           |
+| ⛔ block | 0.07 | task     | fix the bug                                      |
+| 💡 coach | 0.45 | task     | make the tests pass                              |
+| ✅ pass  | 0.86 | question | why does the login page sometimes show a blank … |
+| ✅ pass  | 0.96 | task     | Add a --json flag to examples/pr-risk/pr_risk.py…|
+```
+
+Installed for this repo in `.claude/settings.json`; try typing `fix the bug` in a new
+session here.
+
 ## Shared code
 
 `jevlab/pr.py` fetches a PR via `gh`, splits the unified diff into files and hunks,
@@ -123,6 +142,11 @@ on code that merely assigns ORM fields before `db.add()`. Both were fixed by add
 boundary case to the rule's `criteria.false`, not by moving a threshold. When a wrong
 answer makes you say "but what I meant was…", that sentence is the missing half of the
 instruction.
+
+**Level and criteria text must cover every case you'll send.** The prompt-coach goal
+Score asked what the developer wants "to happen"; a precise question scored as vague
+because a question doesn't ask for anything to happen. One clause in the top level fixed
+it.
 
 **Ask the right kind of question for the criterion.** "Has unit tests" is about the PR,
 not about software behavior, so no hunk-level question can answer it. ac-coverage now
