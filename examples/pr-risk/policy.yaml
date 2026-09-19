@@ -25,14 +25,14 @@ model: jev-latest
 thresholds:
   medium: 2
   high: 4
-  critical: 12
+  critical: 14
 
 # Points a fired rule contributes, by its `risk` label (times `weight`).
 risk_points:
   low: 0
   medium: 2
   high: 4
-  critical: 12
+  critical: 14
 
 # A rule "fires" when Jev's probability is at least this.
 fire_threshold: 0.6
@@ -89,23 +89,34 @@ rules:
 
   - id: data-migration
     description: >-
-      The change adds or edits a database schema migration, or changes how
-      stored records are read from or written to a database (SQL queries, ORM
-      models or fields, or serialization of persisted data).
+      The change adds or edits a database schema migration, changes the
+      definition of a database table, ORM model, or column, or changes the
+      text of a SQL query.
     risk: high
     criteria:
       true: >-
-        A migration file is added or edited, a model or table definition
-        changes, or a query that reads or writes persisted data changes.
+        A migration file is added or edited, a table/model/column definition
+        is added, removed, or altered, or the SQL of a query changes.
       false: >-
-        No changed line touches persistence. In-memory data structures and
-        API request/response objects do not count.
+        No schema, model, or query definition changes. Code that only assigns
+        different values to existing model fields, or calls an unchanged
+        query, does not count. In-memory data structures and API
+        request/response objects do not count.
 
   - id: data-deletion
     description: >-
-      The change adds or edits code that deletes, truncates, or bulk-updates
-      stored data, or drops a table or column.
+      The change adds or edits application code that deletes, truncates, or
+      bulk-updates stored data, or a migration `upgrade` step that drops a
+      table or column.
     risk: high
+    criteria:
+      true: >-
+        An added (+) line deletes or bulk-updates rows, truncates a table, or
+        drops a table or column as part of applying the change.
+      false: >-
+        The only drop is inside a migration's `downgrade`/rollback function
+        that reverses what the same migration creates, or the change deletes
+        nothing that is stored.
 
   - id: hardcoded-secret
     description: >-
@@ -122,16 +133,19 @@ rules:
 
   - id: public-api-contract
     description: >-
-      The change modifies a public interface used by other code or clients:
-      renames or removes an exported function, class, or endpoint; changes the
-      parameters or return type of a public function; or changes the fields
-      of a request or response payload or serialized format.
+      The change modifies an interface that code outside this repository or
+      API clients depend on: renames or removes an HTTP endpoint, a published
+      library function or class, or a CLI command; changes their parameters or
+      return type; or changes the fields of a request/response payload or a
+      serialized format.
     risk: high
     criteria:
       true: >-
-        Existing callers or API clients would have to change to keep working.
+        Existing external callers or API clients would have to change to keep
+        working.
       false: >-
-        Only internal or private code changes, or the change is purely
+        Only internal functions change, or every caller of a renamed or
+        changed function is updated in the same diff, or the change is purely
         additive (a new optional parameter or field) and old callers still work.
 
   - id: external-input-handling
@@ -241,5 +255,5 @@ dependency_rules:
 # categories (lines vs files) wins.
 size_rules:
   lines_changed: { small: 50, medium: 300 }
-  files_changed: { small: 3, medium: 10 }
+  files_changed: { small: 5, medium: 15 }
   points: { small: 0, medium: 1, large: 2 }
