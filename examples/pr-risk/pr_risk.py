@@ -35,7 +35,8 @@ from dotenv import load_dotenv
 from typesafe_sdk import AsyncTypeSafeClient, Noul, Score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from jevlab.pr import FileDiff, PullRequest, dependency_changes, estimate_tokens, load_pr  # noqa: E402
+from jevlab.cost import cost_usd  # noqa: E402
+from jevlab.pr import FileDiff, PullRequest, PullRequestError, dependency_changes, estimate_tokens, load_pr  # noqa: E402
 
 load_dotenv()
 
@@ -578,6 +579,7 @@ def assess(pr: PullRequest, policy: Policy, chunks: list[Chunk], responses: list
             "requests": len(responses) + extra_requests,
             "input_tokens": sum(r.usage.input_tokens for r in responses),
             "output_tokens": sum(r.usage.output_tokens for r in responses),
+            "cost_usd": round(cost_usd(sum(r.usage.input_tokens for r in responses)), 6),
         },
         "policy": str(policy.path),
     }
@@ -644,7 +646,7 @@ def print_report(result: dict[str, Any]) -> None:
 
     ch = result["chunks"]
     print(f"\n{result['usage']['requests']} request(s) over {len(ch)} chunk(s), ~{sum(c['est_tokens'] for c in ch)} est. state tokens, "
-          f"{result['usage']['input_tokens']} input tokens billed"
+          f"{result['usage']['input_tokens']} input tokens billed · ${result['usage']['cost_usd']:.4f}"
           + ("  [TRUNCATED diffs]" if result["truncated"] else ""))
 
 
@@ -666,7 +668,11 @@ def main() -> None:
 
     policy = load_policy(Path(args.policy).resolve())
     model = args.model or policy.raw.get("model")
-    pr = load_pr(args.ref, body_file=args.body_file, diff_file=args.diff_file, repo=args.repo)
+    try:
+        pr = load_pr(args.ref, body_file=args.body_file, diff_file=args.diff_file, repo=args.repo)
+    except (PullRequestError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
 
     chunks = build_chunks(pr)
     if not chunks:

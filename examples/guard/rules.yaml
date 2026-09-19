@@ -1,0 +1,85 @@
+# Guard rules: natural-language lint rules judged by Jev on every Edit/Write.
+#
+# Each rule becomes one Noul question about the text being written. Jev reads
+# literally, so `description` states ONE condition in plain words and `criteria`
+# pins the boundary (what does and does not count). Rules are scoped by path
+# globs so a rule about Node code never fires on a Python file, and only the
+# matching rules are asked, so most edits cost one small request or none.
+#
+# action:  deny  -> the edit is rejected; Claude sees `fix` and the reason
+#          ask   -> you get a permission prompt naming the rule
+#          warn  -> the edit proceeds; Claude gets a note
+# fire:    probability at or above which the rule counts (default 0.7)
+
+version: 1
+default_fire: 0.7
+
+rules:
+  - id: no-console-log
+    description: >-
+      The new code calls console.log, console.debug, console.info, console.warn,
+      or console.error directly, instead of the project's logger.
+    criteria:
+      true: >-
+        A `console.<method>(...)` call appears in the new code and was not already
+        present unchanged in the old code.
+      false: >-
+        No console call, or the console call is only inside a comment or string,
+        or the file being edited is itself the logger implementation, or the same
+        console call is already in the old code and is only being moved.
+    paths: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"]
+    exclude: ["**/*.test.*", "**/*.spec.*", "**/scripts/**", "**/logger.*"]
+    action: deny
+    fix: "Use the project logger: `import { log } from '@/lib/logger'` then `log.info(...)` / `log.error(...)`."
+
+  - id: no-print-in-library
+    description: >-
+      The new code calls print() in library code that should not write to stdout.
+    criteria:
+      true: "A print(...) call appears in the new code, outside of a docstring or comment."
+      false: "No print call, or it is inside a string/docstring/comment, or the same print call is already in the old code."
+    paths: ["jevlab/**/*.py"]
+    action: deny
+    fix: "jevlab/ is imported by the examples; raise, return, or use `logging` instead of printing."
+
+  - id: no-hardcoded-secret
+    description: >-
+      The new code contains a hard-coded secret: an API key, token, password,
+      private key, or connection string with credentials, written as a literal.
+    criteria:
+      true: >-
+        A string literal that looks like a real credential (sk-..., AKIA..., a JWT,
+        a password= value, a URL with user:pass@), or a variable named *_KEY,
+        *_SECRET, *_TOKEN, PASSWORD assigned a non-empty literal that is not an
+        obvious placeholder.
+      false: >-
+        Values read from the environment or config, empty strings, or obvious
+        placeholders like "your-api-key-here", "xxx", "changeme", "<token>".
+    paths: ["**/*"]
+    exclude: ["**/*.md", "**/fixtures/**", "**/*.example", "**/.env.example"]
+    action: deny
+    fix: "Read it from the environment (`os.environ[...]` / `process.env.X`) and keep the value in .env, which is git-ignored."
+
+  - id: no-bare-except
+    description: >-
+      The new Python code catches all exceptions with a bare `except:` or
+      `except Exception:` and then silently continues without re-raising,
+      logging, or returning an error.
+    criteria:
+      true: "An except clause with no type or with Exception/BaseException whose body is only `pass`, `continue`, `return None`, or `...`."
+      false: "The handler logs, re-raises, returns an error, or catches a specific exception type."
+    paths: ["**/*.py"]
+    exclude: ["**/tests/**", "**/test_*.py"]
+    action: ask
+    fix: "Catch the specific exception, or at least log it before continuing."
+
+  - id: todo-needs-ticket
+    description: >-
+      The new code adds a TODO or FIXME comment without a ticket or issue reference.
+    criteria:
+      true: "A TODO/FIXME/XXX comment is added that has no issue number, ticket id (ABC-123), or URL next to it."
+      false: "No new TODO/FIXME, or it carries a reference like TODO(#123), TODO: JEV-42, or a link."
+    paths: ["**/*"]
+    exclude: ["**/*.md"]
+    action: warn
+    fix: "Add the issue reference: `# TODO(#123): ...`."

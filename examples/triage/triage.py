@@ -10,6 +10,8 @@ Run:  uv run examples/triage/triage.py   (reads TYPESAFE_API_KEY from .env)
 from dotenv import load_dotenv
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
+from jevlab.cost import cost_usd
+
 load_dotenv()  # loads TYPESAFE_API_KEY from ./.env
 
 TICKET = {
@@ -58,7 +60,7 @@ def main() -> None:
     print(f"department : {dept.choice}  probs={ {k: round(v, 3) for k, v in dept.probabilities.items()} }  confidence={dept.confidence:.2f}")
     print(f"frustration: {frustration.score:.2f} on 0-2  confidence={frustration.confidence:.2f}")
     print(f"is_urgent  : p(yes)={urgent.noul:.3f}")
-    print(f"usage      : {resp.usage.input_tokens} in / {resp.usage.output_tokens} out")
+    print(f"usage      : {resp.usage.input_tokens} in / {resp.usage.output_tokens} out  (${cost_usd(resp.usage.input_tokens):.5f})")
 
     # --- Policy lives in code, not in the model. Tune these on your own data. ---
     print("\n--- decisions ---")

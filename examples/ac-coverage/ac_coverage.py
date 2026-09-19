@@ -32,12 +32,14 @@ import asyncio
 import json
 import re
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 
 from dotenv import load_dotenv
 from typesafe_sdk import AsyncTypeSafeClient, Noul, Score
 
-from jevlab.pr import FileDiff, Hunk, PullRequest, dependency_changes, estimate_tokens, load_pr
+from jevlab.cost import cost_usd, format_usage
+from jevlab.pr import FileDiff, Hunk, PullRequest, PullRequestError, dependency_changes, estimate_tokens, load_pr
 
 load_dotenv()
 
@@ -299,7 +301,11 @@ def coverage_questions(c: Criterion) -> dict[str, Noul | Score]:
 
 # ----------------------------------------------------------------------------- pipeline
 
+USAGE = {"requests": 0, "input": 0, "seconds": 0.0}  # filled by run(); printed in the footer
+
+
 async def run(pr: PullRequest, criteria: list[Criterion], model: str | None, verbose: bool) -> list[Verdict]:
+    t0 = time.perf_counter()
     files = pr.content_files
     hunks_by_id: dict[str, Hunk] = {}
     for f in files:
@@ -419,8 +425,7 @@ async def run(pr: PullRequest, criteria: list[Criterion], model: str | None, ver
             or v.status == "partial"
         )
 
-    if verbose:
-        print(f"[usage] {usage['requests']} request(s), {usage['input']:,} input tokens", file=sys.stderr)
+    USAGE.update(requests=usage["requests"], input=usage["input"], seconds=time.perf_counter() - t0)
     return [verdicts[c.id] for c in criteria]
 
 
@@ -485,6 +490,8 @@ def render(pr: PullRequest, verdicts: list[Verdict]) -> str:
         lines.append("")
     if any(v.needs_review for v in verdicts):
         lines.append("👀 = low confidence or partial; worth a human look.")
+    lines.append("")
+    lines.append(f"Jev: {format_usage(USAGE['requests'], USAGE['input'], USAGE['seconds'])}")
     return "\n".join(lines)
 
 
@@ -495,6 +502,7 @@ def to_json(pr: PullRequest, verdicts: list[Verdict]) -> str:
             "files_judged": [f.path for f in pr.content_files],
             "files_skipped": [f.path for f in pr.noise_files],
             "verdicts": [asdict(v) for v in verdicts],
+            "usage": {"requests": USAGE["requests"], "input_tokens": USAGE["input"], "cost_usd": round(cost_usd(USAGE["input"]), 6), "seconds": round(USAGE["seconds"], 2)},
         },
         indent=2,
     )
@@ -514,7 +522,11 @@ def main() -> int:
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
-    pr = load_pr(args.ref, body_file=args.body_file, diff_file=args.diff_file, repo=args.repo)
+    try:
+        pr = load_pr(args.ref, body_file=args.body_file, diff_file=args.diff_file, repo=args.repo)
+    except (PullRequestError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     if args.criteria_file:
         criteria = [Criterion(f"ac{i + 1}", t.strip()) for i, t in enumerate(open(args.criteria_file)) if t.strip()]
     else:

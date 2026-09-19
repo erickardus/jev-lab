@@ -40,6 +40,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
+from jevlab.cost import cost_usd
+
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 
@@ -67,6 +69,7 @@ class Judgment:
     outcome: str  # pass | coach | block
     missing: list[str]
     ms: int
+    input_tokens: int = 0
 
 
 # ----------------------------------------------------------------------------- questions
@@ -190,6 +193,7 @@ def judge(prompt: str, is_first: bool, client: TypeSafeClient) -> Judgment:
         outcome=outcome,
         missing=missing,
         ms=int((time.perf_counter() - t0) * 1000),
+        input_tokens=resp.usage.input_tokens,
     )
 
 
@@ -317,6 +321,8 @@ def main() -> int:
         else:
             js = [judge(p, first, client) for p, first in FIXTURES]
             print(render_table(js))
+            tok = sum(j.input_tokens for j in js)
+            print(f"\n{len(js)} prompts · {tok:,} input tokens · ${cost_usd(tok):.4f} total · ${cost_usd(tok) / len(js):.5f} per prompt")
     return 0
 
 

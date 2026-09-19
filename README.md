@@ -122,11 +122,48 @@ one-line nudge and Claude is told to ask a clarifying question first.
 Installed for this repo in `.claude/settings.json`; try typing `fix the bug` in a new
 session here.
 
+### [`pii-writes/`](examples/pii-writes/) — where does personal data flow?
+
+Scans a PR, diff, or files for code that writes personal data to logs, analytics, error
+trackers, third parties, files, or the database. Stage 1 asks per hunk which sinks and
+which categories of data are involved; stage 2 asks per line, so `email → log` (high) and
+`ssn → database` (medium) in the same hunk are separate findings. Hashed/masked writes
+come back low, test fixtures info.
+
+```
+🔴 HIGH   app/auth/signup.py:30
+        log  ·  in a hunk with: email, name, gov_id, network, dob
+           30: +    logger.info("new signup user_id=%s email=%s name=%s ip=%s", user.id, email, full_name, request.remote_addr)
+🟠 MEDIUM app/auth/signup.py:25
+        store; sensitive data (ID/financial/health/DOB/credentials)
+           25: +    user.ssn = ssn
+🟡 LOW    app/auth/signup.py:42
+        log; protected before write
+           42: +    logger.debug("signup fingerprint=%s", email_hash)
+```
+
+### [`guard/`](examples/guard/) — a semantic linter that rejects the agent's edit
+
+A `PreToolUse` hook on `Edit`/`Write`. Rules are plain English in `rules.yaml` ("calls
+console.log instead of the project logger", "catches everything and silently continues",
+"hard-codes a secret"), scoped by path, each one a Noul over the text about to be
+written. A firing `deny` rule rejects the edit and Claude sees the rule and the fix, so it
+rewrites and retries on its own. Handles what a regex can't: the same `console.log` being
+moved rather than added (p=0.15), one inside a comment, or the logger's own source file.
+
+```
+Guard rejected this edit. Rule(s) violated:
+- no-console-log (p=0.90): Use the project logger: `import { log } from '@/lib/logger'` ...
+Rewrite the change so it complies, then retry.
+```
+
 ## Shared code
 
-`jevlab/pr.py` fetches a PR via `gh`, splits the unified diff into files and hunks,
-drops noise (lockfiles, generated files, binaries) before anything reaches the model,
-and extracts dependency version bumps with their major/minor/patch classification.
+`jevlab/pr.py` fetches a PR via `gh` (a missing PR or login is a one-line error, exit 2),
+splits the unified diff into files and hunks with line numbers, drops noise (lockfiles,
+generated files, binaries) before anything reaches the model, and extracts dependency
+version bumps with their major/minor/patch classification. `jevlab/cost.py` turns Jev
+usage into dollars; every tool prints its requests, input tokens, and cost.
 
 ## What we learned about Jev
 

@@ -16,6 +16,24 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": [
+              "run",
+              "--project",
+              "${CLAUDE_PROJECT_DIR}",
+              "${CLAUDE_PROJECT_DIR}/examples/guard/guard.py"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

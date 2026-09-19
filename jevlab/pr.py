@@ -51,6 +51,25 @@ class Hunk:
     def text(self) -> str:
         return f"{self.header}\n{self.body}"
 
+    @property
+    def new_start(self) -> int:
+        """First line number of this hunk in the new version of the file."""
+        m = re.search(r"\+(\d+)", self.header)
+        return int(m.group(1)) if m else 1
+
+    def numbered_lines(self) -> list[tuple[int | None, str, str]]:
+        """(new_line_number or None for removed lines, marker '+'/'-'/' ', text)."""
+        out: list[tuple[int | None, str, str]] = []
+        n = self.new_start
+        for line in self.body.splitlines():
+            marker, text = (line[0], line[1:]) if line[:1] in "+- " else (" ", line)
+            if marker == "-":
+                out.append((None, "-", text))
+            else:
+                out.append((n, marker, text))
+                n += 1
+        return out
+
 
 @dataclass
 class FileDiff:
@@ -167,10 +186,22 @@ def parse_unified_diff(diff: str) -> list[FileDiff]:
 # --------------------------------------------------------------------------- loading
 
 
+class PullRequestError(Exception):
+    """A PR could not be loaded (not found, no gh login, no network). Message is user-facing."""
+
+
 def _gh(*args: str) -> str:
     # A stale GITHUB_TOKEN in the shell overrides gh's stored login; prefer the login.
     env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
-    return subprocess.run(["gh", *args], check=True, capture_output=True, text=True, env=env).stdout
+    try:
+        proc = subprocess.run(["gh", *args], check=False, capture_output=True, text=True, env=env)
+    except FileNotFoundError:
+        raise PullRequestError("`gh` is not installed; install GitHub CLI or pass --body-file/--diff-file") from None
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        detail = detail[-1] if detail else f"gh exited {proc.returncode}"
+        raise PullRequestError(f"gh {' '.join(args[:3])} failed: {detail}")
+    return proc.stdout
 
 
 def load_pr(

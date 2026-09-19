@@ -74,7 +74,7 @@ Score breakdown
    +0.59  base       behavior change: modifies existing behavior (1.8/3, confidence 0.64)
        =  1.96 -> LOW
 
-1 request(s) over 1 chunk(s), ~3010 est. state tokens, 5501 input tokens billed
+1 request(s) over 1 chunk(s), ~3010 est. state tokens, 5501 input tokens billed · $0.0002
 ```
 
 Top to bottom:
