@@ -245,6 +245,9 @@ def dependency_changes(pr: PullRequest) -> list[dict]:
         # module v1.2.3 (go.mod)
         re.compile(r"^\s*([\w./-]+)\s+(" + ver + r")"),
     ]
+    # Keys that carry a version but are not dependencies (the package's own
+    # version, the interpreter constraint).
+    not_deps = {"version", "requires-python", "python_requires", "requires_python"}
     out: list[dict] = []
     for f in pr.files:
         if not f.is_manifest:
@@ -260,6 +263,8 @@ def dependency_changes(pr: PullRequest) -> list[dict]:
                     m = pat.search(content)
                     if m:
                         name, full = m.group(1), m.group(2)
+                        if name.lower() in not_deps:
+                            break
                         parts = tuple(int(x) if x else 0 for x in m.groups()[2:5])
                         (added if line[0] == "+" else removed)[name] = (full, parts)
                         break

@@ -37,7 +37,7 @@ from dataclasses import asdict, dataclass, field
 from dotenv import load_dotenv
 from typesafe_sdk import AsyncTypeSafeClient, Noul, Score
 
-from jevlab.pr import FileDiff, Hunk, PullRequest, estimate_tokens, load_pr
+from jevlab.pr import FileDiff, Hunk, PullRequest, dependency_changes, estimate_tokens, load_pr
 
 load_dotenv()
 
@@ -46,6 +46,8 @@ RELEVANT = 0.6  # Noul p(yes) for a hunk to count as evidence for a criterion
 WEAK_RELEVANT = 0.3  # fallback: if nothing clears RELEVANT, take the top few above this
 MAX_EVIDENCE_HUNKS = 12  # cap evidence per criterion (stage 2 state size)
 UNVERIFIABLE = 0.7  # p(yes) that a criterion can't be judged from a diff
+ABOUT_PR = 0.7  # p(yes) that a criterion is about the PR itself (files, tests present, size), not behavior
+META_PASS = 0.6  # p(yes) that a PR-level criterion is satisfied by the PR metadata
 FULL = 1.5  # Score >= FULL  -> implemented        (levels 0..2)
 PARTIAL = 0.5  # Score >= PARTIAL -> partial
 CONTRADICTS = 0.6  # p(yes) that the evidence does the opposite of the criterion
@@ -74,13 +76,15 @@ class Evidence:
 @dataclass
 class Verdict:
     criterion: Criterion
-    status: str  # implemented | partial | not_implemented | contradicted | no_evidence | unverifiable
+    status: str  # implemented | partial | not_implemented | contradicted | no_evidence | unverifiable | pr_check_pass | pr_check_fail
     coverage_score: float | None = None
     coverage_confidence: float | None = None
     coverage_probabilities: dict[int, float] | None = None
     has_tests: float | None = None
     contradicts: float | None = None
     unverifiable: float = 0.0
+    about_pr: float = 0.0
+    meta_satisfied: float | None = None
     needs_review: bool = False
     evidence: list[Evidence] = field(default_factory=list)
 
@@ -155,8 +159,29 @@ def pack_hunks(files: list[FileDiff]) -> list[list[Hunk]]:
 
 def verifiability_questions(criteria: list[Criterion]) -> dict[str, Noul]:
     """Stage 0: about the criterion text alone. Runs concurrently with stage 1."""
-    return {
-        c.id: Noul(
+    qs: dict[str, Noul] = {}
+    for c in criteria:
+        # Some criteria describe the PR, not the software ("has unit tests", "touches only
+        # one file"). Hunk-level relevance can't see those; they get judged against the
+        # PR's file list instead.
+        qs[f"{c.id}|about_pr"] = Noul(
+            instructions=(
+                f"This acceptance criterion is about the pull request itself rather than about how "
+                f'the software behaves: "{c.text}"'
+            ),
+            criteria={
+                "true": (
+                    "It talks about which files, file types, or tests the change contains, how many "
+                    "lines or files it touches, its description, or dependencies it adds or bumps"
+                ),
+                "false": (
+                    "It describes what the software does for a user or caller: an endpoint, a "
+                    "validation, an output, a stored value, an error, a configuration effect"
+                ),
+            },
+        )
+    qs.update({
+        f"{c.id}|unverifiable": Noul(
             instructions=(
                 f"This acceptance criterion cannot be confirmed by reading a source-code diff alone: "
                 f'"{c.text}"'
@@ -171,6 +196,40 @@ def verifiability_questions(criteria: list[Criterion]) -> dict[str, Noul]:
                     "It describes behavior, validation, data handling, API shape, configuration, or "
                     "tests that a reader can recognize in code changes"
                 ),
+            },
+        )
+        for c in criteria
+    })
+    return qs
+
+
+def pr_metadata(pr: PullRequest) -> dict:
+    """What a PR-level criterion is judged against. Facts computed in code, not by Jev."""
+    return {
+        "title": pr.title,
+        "description": pr.body[:2000],
+        "files": [
+            {
+                "path": f.path,
+                "status": f.status,
+                "lines_added": f.added,
+                "lines_removed": f.removed,
+                "is_test_file": f.is_test,
+                "extension": f.path.rsplit(".", 1)[-1] if "." in f.path.rsplit("/", 1)[-1] else "",
+            }
+            for f in pr.files
+        ],
+        "dependency_changes": dependency_changes(pr),
+    }
+
+
+def meta_questions(criteria: list[Criterion]) -> dict[str, Noul]:
+    return {
+        c.id: Noul(
+            instructions=f'The pull request described in the state satisfies this criterion: "{c.text}"',
+            criteria={
+                "true": "The files, their paths, statuses, test flags, sizes, description, or dependency changes listed show the criterion is met",
+                "false": "Nothing listed shows it, or the listed facts show the opposite",
             },
         )
         for c in criteria
@@ -285,6 +344,14 @@ async def run(pr: PullRequest, criteria: list[Criterion], model: str | None, ver
                 row = "  ".join(f"{c.id}={relevance[c.id].get(hid, 0):.2f}" for c in criteria)
                 print(f"  {hid:<4} {h.file:<50} {row}", file=sys.stderr)
 
+        # PR-level criteria are judged against the file list, not against hunks.
+        meta_ids = [c.id for c in criteria if s0.nouls[f"{c.id}|about_pr"].noul >= ABOUT_PR]
+        meta_task = None
+        if meta_ids:
+            meta_task = asyncio.create_task(
+                ask(pr_metadata(pr), meta_questions([c for c in criteria if c.id in meta_ids]))
+            )
+
         # Stage 2: one request per criterion that has evidence.
         verdicts: dict[str, Verdict] = {}
         stage2: dict[str, asyncio.Task] = {}
@@ -294,9 +361,15 @@ async def run(pr: PullRequest, criteria: list[Criterion], model: str | None, ver
             picked = strong or [(h, p) for h, p in ranked[:3] if p >= WEAK_RELEVANT]
             picked = picked[:MAX_EVIDENCE_HUNKS]
             ev = [Evidence(h, hunks_by_id[h].file, p, _hunk_text(hunks_by_id[h])) for h, p in picked]
-            v = Verdict(criterion=c, status="no_evidence", unverifiable=s0.nouls[c.id].noul, evidence=ev)
+            v = Verdict(
+                criterion=c,
+                status="no_evidence",
+                unverifiable=s0.nouls[f"{c.id}|unverifiable"].noul,
+                about_pr=s0.nouls[f"{c.id}|about_pr"].noul,
+                evidence=ev,
+            )
             verdicts[c.id] = v
-            if not ev:
+            if not ev or c.id in meta_ids:
                 continue
             # Keep the stage-2 state inside budget: drop lowest-relevance hunks if needed.
             while ev and sum(estimate_tokens(e.diff) for e in ev) > STATE_BUDGET_TOKENS:
@@ -317,9 +390,17 @@ async def run(pr: PullRequest, criteria: list[Criterion], model: str | None, ver
             v.coverage_probabilities = {int(k): round(p, 3) for k, p in cov.probabilities.items()}
             v.has_tests = resp.nouls["has_tests"].noul
             v.contradicts = resp.nouls["contradicts"].noul
+        if meta_task is not None:
+            resp = await meta_task
+            for cid, ans in resp.nouls.items():
+                verdicts[cid].meta_satisfied = ans.noul
 
     # --- Policy lives here, in code. -----------------------------------------------
     for v in verdicts.values():
+        if v.meta_satisfied is not None:
+            v.status = "pr_check_pass" if v.meta_satisfied >= META_PASS else "pr_check_fail"
+            v.needs_review = 0.35 <= v.meta_satisfied <= 0.65
+            continue
         if v.coverage_score is None:
             v.status = "no_evidence"
         elif v.coverage_score >= FULL:
@@ -352,6 +433,8 @@ ICON = {
     "contradicted": "⛔",
     "no_evidence": "❌",
     "unverifiable": "🔍",
+    "pr_check_pass": "✅",
+    "pr_check_fail": "❌",
 }
 LABEL = {
     "implemented": "implemented",
@@ -360,12 +443,14 @@ LABEL = {
     "contradicted": "contradicted by diff",
     "no_evidence": "no evidence in diff",
     "unverifiable": "can't verify from diff",
+    "pr_check_pass": "PR-level check passes",
+    "pr_check_fail": "PR-level check fails",
 }
 
 
 def render(pr: PullRequest, verdicts: list[Verdict]) -> str:
     lines = [f"# AC coverage: {pr.title}" + (f" (#{pr.number})" if pr.number else ""), ""]
-    n_ok = sum(v.status == "implemented" for v in verdicts)
+    n_ok = sum(v.status in ("implemented", "pr_check_pass") for v in verdicts)
     lines.append(f"{n_ok}/{len(verdicts)} criteria implemented  ·  "
                  f"{len(pr.content_files)} files judged, {len(pr.noise_files)} skipped as noise")
     lines.append("")
@@ -379,10 +464,13 @@ def render(pr: PullRequest, verdicts: list[Verdict]) -> str:
         lines.append(f"| {i} | {ICON[v.status]} {LABEL[v.status]}{flag} | {score} | {conf} | {tests} | {v.criterion.text} |")
     lines.append("")
     for i, v in enumerate(verdicts, 1):
-        if v.status == "implemented" and not v.needs_review:
+        if v.status in ("implemented", "pr_check_pass") and not v.needs_review:
             continue
         lines.append(f"## {i}. {v.criterion.text}")
         lines.append(f"status: {LABEL[v.status]}" + (f"  ·  p(unverifiable)={v.unverifiable:.2f}" if v.unverifiable > 0.3 else ""))
+        if v.meta_satisfied is not None:
+            lines.append(f"judged against the PR's file list, not the code (p(about PR)={v.about_pr:.2f}, p(satisfied)={v.meta_satisfied:.2f})")
+            continue
         if v.contradicts is not None and v.contradicts > 0.3:
             lines.append(f"p(contradicts)={v.contradicts:.2f}")
         if v.coverage_probabilities:
@@ -441,7 +529,7 @@ def main() -> int:
 
     verdicts = asyncio.run(run(pr, criteria, args.model, args.verbose))
     print(to_json(pr, verdicts) if args.json else render(pr, verdicts))
-    ok = all(v.status in ("implemented", "unverifiable") for v in verdicts)
+    ok = all(v.status in ("implemented", "unverifiable", "pr_check_pass") for v in verdicts)
     return 0 if ok else 1
 
 

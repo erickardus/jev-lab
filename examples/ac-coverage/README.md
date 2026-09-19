@@ -5,6 +5,8 @@ per bullet whether the change addresses it. Judged by Jev (TypeSafe's System One
 model): fast, cheap, calibrated yes/no and graded judgments over small pieces of
 evidence. Code owns the workflow; Jev only answers narrow questions.
 
+## How to run
+
 ```
 uv run examples/ac-coverage/ac_coverage.py 123 [--repo owner/name] [--json] [-v]
 uv run examples/ac-coverage/ac_coverage.py --body-file pr.md --diff-file pr.diff
@@ -14,7 +16,7 @@ uv run examples/ac-coverage/ac_coverage.py 123 --criteria-file criteria.txt   # 
 Exit code is `0` when every criterion is implemented (or can't be judged from code),
 `1` otherwise, so it drops into CI.
 
-## Example
+## Example response
 
 ```
 $ uv run examples/ac-coverage/ac_coverage.py --body-file fixtures/password-reset.md --diff-file fixtures/password-reset.diff
@@ -33,14 +35,44 @@ $ uv run examples/ac-coverage/ac_coverage.py --body-file fixtures/password-reset
 The fixture plants exactly that: three criteria done, one contradicted (`abort(404)` on
 unknown email), one missing. ~11k input tokens, ~1.5 s, well under a cent.
 
+## A real PR, and PR-level criteria
+
+The same repo's PR #1 has two criteria that are about the PR rather than the software:
+
+```
+$ uv run examples/ac-coverage/ac_coverage.py 1
+
+1/2 criteria implemented  ·  2 files judged, 0 skipped as noise
+
+| # | status                   | score | conf | tests | criterion                 |
+|---|--------------------------|-------|------|-------|---------------------------|
+| 1 | ❌ PR-level check fails  | –     | –    | –     | Has unit tests            |
+| 2 | ✅ PR-level check passes | –     | –    | –     | Has at least one .py file |
+
+## 1. Has unit tests
+status: PR-level check fails
+judged against the PR's file list, not the code (p(about PR)=0.92, p(satisfied)=0.06)
+```
+
+The first version of this tool answered ❌ *no evidence* to both. Stage 1 asks whether a
+hunk "determines how the software behaves in the situation the criterion describes", and
+no hunk makes the software "have a .py file", so every relevance probability came back
+under 0.3. Correct, literal, and useless. Stage 0 now also asks whether the criterion is
+about the PR itself; when it is (p ≥ 0.7), it is judged against the file list and
+code-computed facts instead of hunks. The behavioral fixture above is untouched by this:
+all five of its criteria score p(about PR)=0.02.
+
 ## How it works
 
 ```
 PR body ─parse─▶ criteria[]           "## Acceptance Criteria" bullets (or all checkboxes, or --criteria-file)
 PR diff ─split─▶ hunks[]              lockfiles / generated / binary dropped in code
 
-stage 0  verifiability     state = criteria           one Noul per criterion:
+stage 0  triage             state = criteria           two Nouls per criterion:
                                                        "cannot be confirmed from a diff alone"
+                                                       "is about the PR itself, not the software"
+         ── PR-level criteria ("has unit tests", "only touches one file") are judged ──
+         ── against the file list + code-computed facts, not against hunks         ──
 stage 1  relevance fan-out state = {title, hunks}     one Noul per (hunk, criterion):
                                                        "this hunk determines the behavior the criterion describes"
          ── code picks evidence per criterion: p ≥ 0.6, else top-3 ≥ 0.3, else none ──
@@ -81,10 +113,13 @@ makes it fast and cheap.
 | ❌ not implemented | related code exists but does not implement it |
 | ❌ no evidence | no hunk looked related |
 | 🔍 can't verify | criterion needs runtime/visual/manual checking (perf, layout, QA) |
+| ✅/❌ PR-level check | criterion is about the PR (files, tests present, size), judged on metadata |
 | 👀 | low confidence, partial, or borderline relevance: worth a human look |
 
 ## Writing criteria Jev can judge
 
-One observable behavior per bullet, stated concretely. Good: "Requests for an unknown
+One observable behavior per bullet, stated concretely. Criteria about the PR itself
+("has unit tests", "adds a migration") work too, but they are judged on the file list,
+not the code, so they say nothing about *what* the tests check. Good: "Requests for an unknown
 email return the same 200 response as for a known email." Weak: "Handle edge cases
 properly." Performance, look-and-feel, and sign-off criteria come back 🔍 by design.
