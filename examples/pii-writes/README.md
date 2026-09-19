@@ -98,6 +98,94 @@ Reading it:
 - "in a hunk with: …" lists the categories Jev saw anywhere in the surrounding hunk, as
   context; the per-line sensitivity judgment is what set the severity.
 
+## A real PR
+
+[PR #3](https://github.com/erickardus/jev-lab/pull/3) in this repo is a deliberately leaky
+demo app (`demo/`): a signup handler, a nightly customer export, an order module with
+nothing personal in it, and a test. It exists so the scanner has a live target:
+
+```
+$ uv run examples/pii-writes/pii_writes.py 3
+# PII writes: Demo shop: signup, customer export, orders (#3)
+
+4 unit(s) scanned · 🔴 4 high  🟠 5 medium  🟡 1 low  ℹ️  3 info
+
+🔴 HIGH   demo/app/auth/signup.py:30
+        log  ·  in a hunk with: email, name, gov_id, health, network, dob
+           30: +    logger.info("new signup user_id=%s email=%s name=%s ip=%s", user.id, email, full_name, request.remote_addr)
+
+🔴 HIGH   demo/app/auth/signup.py:31
+        telemetry/third_party  ·  in a hunk with: email, name, gov_id, health, network, dob
+           31: +    analytics.track(user.id, "signup", {"email": email, "name": full_name, "plan": data.get("plan")})
+
+🔴 HIGH   demo/app/auth/signup.py:32
+        telemetry/third_party  ·  in a hunk with: email, name, gov_id, health, network, dob
+           32: +    sentry_sdk.set_user({"id": user.id, "email": email})
+
+🔴 HIGH   demo/app/auth/signup.py:34,36
+        log/third_party  ·  in a hunk with: email, name, gov_id, health, network, dob
+           34: +    requests.post(
+           36: +        json={"text": f"New signup: {full_name} <{email}>"},
+
+🟠 MEDIUM demo/app/auth/signup.py:25
+        store; sensitive data (ID/financial/health/DOB/credentials)  ·  in a hunk with: email, name, gov_id, health, network, dob
+           25: +    user.national_id = data.get("national_id")
+
+🟠 MEDIUM demo/app/auth/signup.py:26
+        store; sensitive data (ID/financial/health/DOB/credentials)  ·  in a hunk with: email, name, gov_id, health, network, dob
+           26: +    user.date_of_birth = data.get("date_of_birth")
+
+🟠 MEDIUM demo/app/auth/signup.py:27
+        store; sensitive data (ID/financial/health/DOB/credentials)  ·  in a hunk with: email, name, gov_id, health, network, dob
+           27: +    db.session.add(user)
+
+🟠 MEDIUM demo/app/auth/signup.py:28
+        store; sensitive data (ID/financial/health/DOB/credentials)  ·  in a hunk with: email, name, gov_id, health, network, dob
+           28: +    db.session.commit()
+
+🟠 MEDIUM demo/app/support/export.py:19
+        file  ·  in a hunk with: email, name, phone, address
+           19: +            writer.writerow([u.id, u.name, u.email, u.phone, u.street_address])
+
+🟡 LOW    demo/app/auth/signup.py:41
+        log; protected before write  ·  in a hunk with: email, name, gov_id, health, network, dob
+           41: +    logger.debug("signup fingerprint=%s", fingerprint)
+
+ℹ️  INFO   demo/app/auth/signup.py:24
+        store  ·  in a hunk with: email, name, gov_id, health, network, dob
+           24: +    user = User(email=email, name=full_name)
+
+ℹ️  INFO   demo/app/auth/signup.py:44
+        response  ·  in a hunk with: email, name, gov_id, health, network, dob
+           44: +    return jsonify({"id": user.id, "email": user.email})
+
+ℹ️  INFO   demo/tests/test_signup.py:2
+        response; sensitive data (ID/financial/health/DOB/credentials); fixture data  ·  in a hunk with: email, name, gov_id
+            2: +    r = client.post("/signup", json={"email": "jane.doe@example.com", "name": "Jane Doe", "national_id": "123-45-6789"})
+
+Severity = sink × protection × category, decided in code (see top of pii_writes.py).
+Jev judges each hunk/window alone; data assembled elsewhere and written here is not visible to it.
+
+Jev: 7 request(s) · 66,142 input tokens · $0.0028 · 1.5s
+```
+
+Two things this run shows that the fixture doesn't:
+
+- **New files are all added lines**, so the store operation itself (`db.session.add`,
+  `commit`) gets its own medium row next to the assignments that put the national ID on
+  the object. In a diff that only touches the assignments, only those lines show up. Both
+  are right; a new file just has more true lines.
+- **Borderline lines flicker.** The CSV *header* row in `export.py` line 17
+  (`writer.writerow(["id", "name", "email", ...])`) appeared as a medium finding in one run
+  and not in the next: it writes the *names* of personal-data columns, not the data, and
+  Jev's probability sits near the 0.6 bar. The data row on line 19 is stable at high
+  probability. If a line matters to you and flickers, that is a signal to sharpen the
+  question (here: "the values written, not column names or labels"), not to nudge the
+  threshold. `demo/app/orders.py` is the negative control and produces nothing.
+
+The PR body also carries acceptance criteria, so `ac_coverage.py 3` and `pr_risk.py 3`
+run against the same target.
+
 ## How it works
 
 ```

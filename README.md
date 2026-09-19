@@ -125,7 +125,8 @@ session here.
 ### [`pii-writes/`](examples/pii-writes/) — where does personal data flow?
 
 Scans a PR, diff, or files for code that writes personal data to logs, analytics, error
-trackers, third parties, files, or the database. Stage 1 asks per hunk which sinks and
+trackers, third parties, files, or the database. [PR #3](https://github.com/erickardus/jev-lab/pull/3)
+is a deliberately leaky demo app kept open as a live target: `pii_writes.py 3`. Stage 1 asks per hunk which sinks and
 which categories of data are involved; stage 2 asks per line, so `email → log` (high) and
 `ssn → database` (medium) in the same hunk are separate findings. Hashed/masked writes
 come back low, test fixtures info.
