@@ -158,6 +158,22 @@ Guard rejected this edit. Rule(s) violated:
 Rewrite the change so it complies, then retry.
 ```
 
+### [`village/`](examples/village/) — a tiny world whose people are driven by Jev
+
+Six villagers with roles, traits, needs, and memories, on a top-down map in the browser.
+Every few seconds each idle villager gets one `Choice` over the actions available right
+now — described in words, never coordinates — batched into one Jev request. Code owns
+the map, paths, clock, and effects; an optional LLM writes the dialogue when two of them
+meet. Thought bubbles show Jev's top choice and probability; the panel shows the whole
+distribution. About 7¢ per real hour.
+
+```
+[11:40] Bram → eat_at_tavern (0.70)
+[12:36] Mira → talk_to_sela (0.25)
+[12:36] Mira and Sela talk about gossip
+[13:46] Old Tom and Pip talk about old times
+```
+
 ## Shared code
 
 `jevlab/pr.py` fetches a PR via `gh` (a missing PR or login is a one-line error, exit 2),

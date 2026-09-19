@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Village</title>
+<style>
+  :root { --bg:#14161c; --panel:#1c1f27; --ink:#e8e6df; --muted:#8b8f9c; --line:#2a2e39; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; display:flex; height:100vh; overflow:hidden; }
+  #stage { position:relative; flex:0 0 auto; }
+  canvas { display:block; image-rendering: pixelated; }
+  #panel { flex:1; min-width:340px; max-width:460px; background:var(--panel); border-left:1px solid var(--line); padding:14px 16px; overflow-y:auto; }
+  h1 { font-size:14px; margin:0 0 4px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+  .clock { font-size:26px; margin-bottom:10px; }
+  .clock small { font-size:12px; color:var(--muted); margin-left:8px; }
+  .controls { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  button { background:#2a2e39; color:var(--ink); border:1px solid #363b48; border-radius:4px; padding:4px 9px; font:inherit; cursor:pointer; }
+  button.on { background:#4a86c8; border-color:#4a86c8; color:#fff; }
+  .npc { border-top:1px solid var(--line); padding:9px 0; }
+  .npc .head { display:flex; align-items:center; gap:8px; }
+  .dot { width:10px; height:10px; border-radius:50%; flex:0 0 auto; }
+  .name { font-weight:600; }
+  .role { color:var(--muted); }
+  .doing { margin:3px 0 4px; color:#d7d3c6; }
+  .needs { display:flex; gap:10px; color:var(--muted); font-size:11px; }
+  .needs span b { color:var(--ink); font-weight:500; }
+  .probs { margin-top:5px; }
+  .bar { display:flex; align-items:center; gap:6px; font-size:11px; margin:2px 0; }
+  .bar .lab { width:120px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar .track { flex:1; height:6px; background:#2a2e39; border-radius:3px; overflow:hidden; }
+  .bar .fill { height:100%; background:#4a86c8; }
+  .bar.top .fill { background:#e4b04a; }
+  .bar .val { width:34px; text-align:right; color:var(--muted); }
+  .mem { margin-top:4px; color:var(--muted); font-size:11px; }
+  .events { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; color:var(--muted); font-size:11px; }
+  .events div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stats { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; color:var(--muted); font-size:11px; }
+  .stats b { color:var(--ink); font-weight:500; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="panel">
+  <h1>Village</h1>
+  <div class="clock"><span id="hhmm">--:--</span><small id="label"></small></div>
+  <div class="controls">
+    <button id="pause">pause</button>
+    <button data-speed="1" class="speed on">1×</button>
+    <button data-speed="2" class="speed">2×</button>
+    <button data-speed="4" class="speed">4×</button>
+    <button data-brain="jev" class="brain">brain: jev</button>
+    <button data-brain="random" class="brain">random</button>
+  </div>
+  <div id="npcs"></div>
+  <div class="events" id="events"></div>
+  <div class="stats" id="stats"></div>
+</div>
+<script>
+const TILE = 26;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let map = null, state = null;
+const COLORS = { '.':'#4f7a3a', ':':'#8b7a55', '~':'#3a6ea5', '#':'#2f5a2a', 'H':'#6b4b3a', 'F':'#a68b3c' };
+const ROOF = '#8a4a3a';
+const smooth = {}; // npc id -> {x,y} eased positions
+
+const ws = new WebSocket(`ws://${location.host}/ws`);
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === 'map') { map = msg; canvas.width = map.w * TILE; canvas.height = map.h * TILE; }
+  else if (msg.type === 'state') { state = msg; renderPanel(); }
+};
+const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
+document.getElementById('pause').onclick = () => send({cmd:'pause'});
+document.querySelectorAll('.speed').forEach(b => b.onclick = () => { send({cmd:'speed', value:+b.dataset.speed}); document.querySelectorAll('.speed').forEach(x=>x.classList.toggle('on', x===b)); });
+document.querySelectorAll('.brain').forEach(b => b.onclick = () => send({cmd:'brain', value:b.dataset.brain}));
+
+function drawMap() {
+  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+    const ch = map.rows[y][x];
+    let col = COLORS[ch] || COLORS['.'];
+    if ('abcdefTBWM'.includes(ch)) col = ch === 'W' ? '#5b6b7a' : '#a08a6a';
+    ctx.fillStyle = col; ctx.fillRect(x*TILE, y*TILE, TILE, TILE);
+    if (ch === 'H') { ctx.fillStyle = ROOF; ctx.fillRect(x*TILE+2, y*TILE+2, TILE-4, TILE-4); }
+    if (ch === '#') { ctx.fillStyle = '#3d7a34'; ctx.beginPath(); ctx.arc(x*TILE+TILE/2, y*TILE+TILE/2, TILE*0.36, 0, 7); ctx.fill(); }
+    if (ch === '~') { ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(x*TILE+4, y*TILE+TILE/2, TILE-8, 2); }
+    if (ch === 'F') { ctx.fillStyle = '#c9a94a'; for (let i=0;i<3;i++) ctx.fillRect(x*TILE+5+i*7, y*TILE+6, 2, TILE-12); }
+    if (ch === 'W') { ctx.fillStyle = '#2b3a4a'; ctx.beginPath(); ctx.arc(x*TILE+TILE/2, y*TILE+TILE/2, TILE*0.3, 0, 7); ctx.fill(); }
+  }
+  ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'center';
+  for (const p of map.places) {
+    if (p.kind === 'home') continue;
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    const w = ctx.measureText(p.name).width + 8;
+    ctx.fillRect(p.x*TILE + TILE/2 - w/2, p.y*TILE - 16, w, 14);
+    ctx.fillStyle = '#f3efe2'; ctx.fillText(p.name, p.x*TILE + TILE/2, p.y*TILE - 5);
+  }
+}
+
+function bubble(text, cx, cy, fill, ink, maxW) {
+  ctx.font = '11px ui-monospace, monospace';
+  const words = text.split(' '); const lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur);
+  const w = Math.min(maxW, Math.max(...lines.map(l => ctx.measureText(l).width))) + 12;
+  const h = lines.length * 13 + 8;
+  const x = Math.max(2, Math.min(canvas.width - w - 2, cx - w/2)), y = cy - h - 6;
+  ctx.fillStyle = fill; ctx.strokeStyle = 'rgba(0,0,0,.4)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 5); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-4, y+h); ctx.lineTo(cx, y+h+5); ctx.lineTo(cx+4, y+h); ctx.fill();
+  ctx.fillStyle = ink; ctx.textAlign = 'left';
+  lines.forEach((l, i) => ctx.fillText(l, x + 6, y + 13 + i*13));
+  ctx.textAlign = 'center';
+}
+
+function positions() {
+  // ease toward the server position; spread villagers who share a tile so nobody is hidden
+  const byTile = {};
+  for (const n of state.npcs) {
+    const s = smooth[n.id] || (smooth[n.id] = {x:n.x, y:n.y});
+    s.x += (n.x - s.x) * 0.25; s.y += (n.y - s.y) * 0.25;
+    const key = `${Math.round(n.x)},${Math.round(n.y)}`;
+    (byTile[key] = byTile[key] || []).push(n.id);
+  }
+  const out = {};
+  for (const ids of Object.values(byTile)) ids.forEach((id, i) => {
+    const s = smooth[id], k = ids.length;
+    const off = k > 1 ? (i - (k - 1) / 2) * 12 : 0;
+    out[id] = {cx: s.x*TILE + TILE/2 + off, cy: s.y*TILE + TILE/2 + (k > 1 ? (i % 2) * 5 : 0)};
+  });
+  return out;
+}
+
+function drawNpcs() {
+  const pos = positions();
+  for (const n of state.npcs) {
+    const {cx, cy} = pos[n.id];
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(cx, cy+9, 8, 4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = n.color; ctx.beginPath(); ctx.arc(cx, cy, n.role === 'kid' ? 7 : 9, 0, 7); ctx.fill();
+    // mood: eyes tilt by Score 0..2
+    ctx.fillStyle = '#1b1b1b'; ctx.fillRect(cx-4, cy-2, 2, 2); ctx.fillRect(cx+2, cy-2, 2, 2);
+    ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.2; ctx.beginPath();
+    const m = (n.mood - 1); ctx.moveTo(cx-3, cy+3 - m*1.5); ctx.quadraticCurveTo(cx, cy+3 + m*3, cx+3, cy+3 - m*1.5); ctx.stroke();
+    if (n.deciding) { ctx.fillStyle = '#fff'; for (let i=0;i<3;i++) ctx.beginPath(), ctx.arc(cx-6+i*6, cy-16, 1.6, 0, 7), ctx.fill(); }
+    ctx.fillStyle = '#f3efe2'; ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'center';
+    ctx.fillText(n.name, cx, cy + 22);
+  }
+  for (const n of state.npcs) {
+    const {cx, cy} = pos[n.id];
+    if (n.bubble) bubble(n.bubble, cx, cy - 12, '#f7f3e8', '#1b1b1b', 170);
+    else if (!n.talking_to && n.action && Object.keys(n.probs).length) {
+      const [top, p] = Object.entries(n.probs)[0];
+      bubble(`${n.action_label} · ${Math.round(p*100)}%`, cx, cy - 12, 'rgba(20,22,28,.85)', '#d7d3c6', 190);
+    }
+  }
+}
+
+function frame() {
+  if (map) {
+    drawMap();
+    if (state) {
+      drawNpcs();
+      const dark = 1 - state.clock.daylight;
+      if (dark > 0) { ctx.fillStyle = `rgba(10,14,40,${dark*0.55})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    }
+  }
+  requestAnimationFrame(frame);
+}
+frame();
+
+function renderPanel() {
+  document.getElementById('hhmm').textContent = state.clock.hhmm;
+  document.getElementById('label').textContent = state.clock.label + (state.paused ? ' · paused' : '');
+  document.getElementById('pause').textContent = state.paused ? 'resume' : 'pause';
+  document.querySelectorAll('.brain').forEach(b => b.classList.toggle('on', b.dataset.brain === state.brain.name));
+  document.getElementById('npcs').innerHTML = state.npcs.map(n => `
+    <div class="npc">
+      <div class="head"><span class="dot" style="background:${n.color}"></span><span class="name">${n.name}</span><span class="role">${n.role} · ${n.traits.join(', ')}</span></div>
+      <div class="doing">${n.action_label}${n.deciding ? ' <span style="color:#8b8f9c">· thinking…</span>' : ''}</div>
+      <div class="needs">${Object.entries(n.needs_words).map(([k,v]) => `<span>${k} <b>${v}</b></span>`).join('')} <span>mood <b>${n.mood.toFixed(1)}</b></span></div>
+      <div class="probs">${Object.entries(n.probs).map(([k,p],i) => `
+        <div class="bar ${i===0?'top':''}"><span class="lab">${k}</span><span class="track"><span class="fill" style="width:${Math.round(p*100)}%"></span></span><span class="val">${p.toFixed(2)}</span></div>`).join('')}
+        ${n.probs && Object.keys(n.probs).length ? `<div class="bar"><span class="lab">confidence</span><span class="track"><span class="fill" style="width:${Math.round(n.confidence*100)}%;background:#8b8f9c"></span></span><span class="val">${n.confidence.toFixed(2)}</span></div>` : ''}
+      </div>
+      <div class="mem">${n.memory.slice(-3).map(m => '· ' + m).join('<br>')}</div>
+    </div>`).join('');
+  document.getElementById('events').innerHTML = state.events.slice().reverse().map(e => `<div>${e}</div>`).join('');
+  const b = state.brain, nr = state.narrator;
+  document.getElementById('stats').innerHTML =
+    `brain <b>${b.name}</b> · <b>${b.requests}</b> requests · <b>${b.input_tokens.toLocaleString()}</b> tokens · <b>$${b.cost_usd.toFixed(4)}</b>${b.errors ? ` · ${b.errors} errors` : ''}<br>` +
+    `narrator <b>${nr.name}</b> · <b>${nr.calls}</b> conversations${nr.cost_usd !== undefined ? ` · <b>$${nr.cost_usd.toFixed(4)}</b>` : ''}`;
+}
+</script>
+</body>
+</html>
