@@ -205,12 +205,13 @@ Claude Code skill: `/retro`.
 
 ### [`village/`](examples/village/) — a tiny world whose people are driven by Jev
 
-Six villagers with roles, traits, needs, and memories, on a top-down map in the browser.
-Every few seconds each idle villager gets one `Choice` over the actions available right
-now — described in words, never coordinates — batched into one Jev request. Code owns
-the map, paths, clock, and effects; an optional LLM writes the dialogue when two of them
-meet. Thought bubbles show Jev's top choice and probability; the panel shows the whole
-distribution. About 7¢ per real hour.
+Six villagers with roles, traits, needs, memories, and relationships, on a top-down map in
+the browser — and you, a traveler they notice, walking around by click. Every few seconds
+each idle villager gets one `Choice` over the actions available right now — described in
+words, never coordinates — batched into one Jev request. Rain comes and goes; news spreads
+from villager to villager when a Jev `Noul` says they'd pass it on. Code owns the map,
+paths, clock, and effects; Claude (Haiku) writes the dialogue when two of them meet. Click
+a villager to see every option Jev was offered and its probability. About 7¢ per real hour.
 
 ```
 [11:40] Bram → eat_at_tavern (0.70)

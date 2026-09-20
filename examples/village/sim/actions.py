@@ -127,8 +127,15 @@ def build_actions() -> list[Action]:
         npc.target = world.random_walkable(npc.tile, 7)
 
     acts.append(Action(
+        "shelter", "sheltering from the rain",
+        lambda n, w: f"Get out of the rain: head for {w.places['tavern'].name} ({_dist(n, w, 'tavern')}) and wait it out",
+        lambda n, w: w.weather == "raining" and n.at_place not in ("tavern", n.home),
+        go_to("tavern"), stay(20.0), lambda n, w, s: n.remember("waited out the rain at the tavern"),
+    ))
+
+    acts.append(Action(
         "wander", "wandering",
-        lambda n, w: "Stroll around nearby with no particular aim",
+        lambda n, w: "Stroll around nearby with no particular aim" + (" (it is raining)" if w.weather == "raining" else ""),
         lambda n, w: True,
         wander_start, stay(3.0), lambda n, w, s: None,
     ))
@@ -156,11 +163,17 @@ def talk_action(other: NPC) -> Action:
 
     def describe(n: NPC, w: World) -> str:
         where = w.places[other.at_place].name if other.at_place and w.places[other.at_place].kind != "home" else "on the road" if not other.at_place else "at home"
+        if other.controlled:
+            return f"Walk over to the traveler ({w.distance_word(n.tile, other.tile)}, {where}), a stranger new to the village, and greet them"
         return f"Walk over to {other.name} the {other.role} ({w.distance_word(n.tile, other.tile)}, {where}) and have a chat"
 
     def available(n: NPC, w: World) -> bool:
         # can't chat with someone asleep at home, or already mid-conversation
-        return other.talking_to is None and not (other.at_place == other.home and other.action == "go_home_rest")
+        if other.talking_to is not None:
+            return False
+        if other.controlled:  # the traveler only registers once they are reasonably close
+            return abs(n.x - other.x) + abs(n.y - other.y) <= 14
+        return not (other.at_place == other.home and other.action == "go_home_rest")
 
     def start(n: NPC, w: World) -> None:
         n.target = other.tile

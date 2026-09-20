@@ -48,6 +48,12 @@ class NPC:
     deciding: bool = False
     speed: float = 3.0  # tiles per second
     _chase: int = 0  # how many times we re-pathed toward a moving conversation partner
+    controlled: bool = False  # the player: no brain, no needs; villagers still see them
+    current: object = None  # the Action being executed (kept here, not in a shared registry)
+    knows: list[str] = field(default_factory=list)  # news they have heard, oldest first
+    affinity: dict[str, float] = field(default_factory=dict)  # other id -> how much they like them
+    last_options: dict[str, str] = field(default_factory=dict)  # option id -> description Jev was given
+    share_news: float = 0.0  # Noul: would pass on news when chatting
 
     @property
     def tile(self) -> tuple[int, int]:
@@ -78,14 +84,23 @@ class NPC:
     def describe(self, world) -> dict:
         """What Jev sees about this NPC. Words, not numbers; observed facts, not inferences."""
         here = world.places.get(self.at_place) if self.at_place else None
-        return {
+        where = here.name if here and here.kind != "home" else "home" if here else "on the road"
+        if self.controlled:
+            return {"role": self.role, "traits": self.traits, "at": where, "doing": self.action_label, "recently": list(self.memory)}
+        d = {
             "role": self.role,
             "traits": self.traits,
             "feels": {k: need_word(k, v) for k, v in self.needs.items()},
-            "at": (here.name if here and here.kind != "home" else "home" if here else "on the road"),
+            "at": where,
             "doing": self.action_label,
             "recently": list(self.memory),
         }
+        friends = [world.by_id[o].name for o, a in self.affinity.items() if a >= 0.4 and o in world.by_id]
+        if friends:
+            d["gets_along_with"] = friends
+        if self.knows:
+            d["has_heard"] = self.knows[-3:]
+        return d
 
     def snapshot(self) -> dict:
         return {
@@ -107,7 +122,20 @@ class NPC:
             "talking_to": self.talking_to,
             "memory": list(self.memory),
             "deciding": self.deciding,
+            "controlled": self.controlled,
+            "knows": list(self.knows),
+            "affinity": {k: round(v, 2) for k, v in self.affinity.items()},
+            "options": self.last_options,
+            "all_probs": {k: round(v, 3) for k, v in self.probs.items()},
+            "asleep": self.action == "go_home_rest" and self.at_place == self.home and self.busy_until > 0,
+            "moving": bool(self.path),
         }
+
+
+def traveler(x: float, y: float) -> NPC:
+    """The player. Villagers see 'the traveler'; nobody decides for them."""
+    return NPC("traveler", "Traveler", "traveler passing through, new to the village", ["quiet", "curious"],
+               "market", None, "#3fbf7f", x, y, controlled=True)
 
 
 def default_cast() -> list[NPC]:

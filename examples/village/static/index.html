@@ -4,42 +4,54 @@
 <meta charset="utf-8">
 <title>Village</title>
 <style>
-  :root { --bg:#14161c; --panel:#1c1f27; --ink:#e8e6df; --muted:#8b8f9c; --line:#2a2e39; }
+  :root { --bg:#14161c; --panel:#1c1f27; --ink:#e8e6df; --muted:#8b8f9c; --line:#2a2e39; --accent:#4a86c8; --gold:#e4b04a; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; display:flex; height:100vh; overflow:hidden; }
   #stage { position:relative; flex:0 0 auto; }
-  canvas { display:block; image-rendering: pixelated; }
-  #panel { flex:1; min-width:340px; max-width:460px; background:var(--panel); border-left:1px solid var(--line); padding:14px 16px; overflow-y:auto; }
+  canvas { display:block; cursor: crosshair; image-rendering: pixelated; }
+  #hint { position:absolute; left:10px; bottom:8px; color:rgba(255,255,255,.75); font-size:11px; text-shadow:0 1px 2px #000; pointer-events:none; }
+  #panel { flex:1; min-width:360px; max-width:480px; background:var(--panel); border-left:1px solid var(--line); padding:14px 16px; overflow-y:auto; }
   h1 { font-size:14px; margin:0 0 4px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
-  .clock { font-size:26px; margin-bottom:10px; }
+  h2 { font-size:11px; margin:14px 0 6px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+  .clock { font-size:26px; margin-bottom:8px; }
   .clock small { font-size:12px; color:var(--muted); margin-left:8px; }
-  .controls { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .controls { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
   button { background:#2a2e39; color:var(--ink); border:1px solid #363b48; border-radius:4px; padding:4px 9px; font:inherit; cursor:pointer; }
-  button.on { background:#4a86c8; border-color:#4a86c8; color:#fff; }
-  .npc { border-top:1px solid var(--line); padding:9px 0; }
-  .npc .head { display:flex; align-items:center; gap:8px; }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.wave { background:#2f5a3f; border-color:#3f7a54; }
+  .npc { border-top:1px solid var(--line); padding:8px 0; cursor:pointer; }
+  .npc:hover { background:rgba(255,255,255,.02); }
+  .npc.sel { background:rgba(74,134,200,.08); margin:0 -16px; padding:8px 16px; }
+  .head { display:flex; align-items:center; gap:8px; }
   .dot { width:10px; height:10px; border-radius:50%; flex:0 0 auto; }
   .name { font-weight:600; }
   .role { color:var(--muted); }
   .doing { margin:3px 0 4px; color:#d7d3c6; }
-  .needs { display:flex; gap:10px; color:var(--muted); font-size:11px; }
+  .needs { display:flex; gap:10px; color:var(--muted); font-size:11px; flex-wrap:wrap; }
   .needs span b { color:var(--ink); font-weight:500; }
-  .probs { margin-top:5px; }
   .bar { display:flex; align-items:center; gap:6px; font-size:11px; margin:2px 0; }
-  .bar .lab { width:120px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar .lab { width:130px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bar .track { flex:1; height:6px; background:#2a2e39; border-radius:3px; overflow:hidden; }
-  .bar .fill { height:100%; background:#4a86c8; }
-  .bar.top .fill { background:#e4b04a; }
+  .bar .fill { height:100%; background:var(--accent); }
+  .bar.top .fill { background:var(--gold); }
   .bar .val { width:34px; text-align:right; color:var(--muted); }
-  .mem { margin-top:4px; color:var(--muted); font-size:11px; }
+  .opt { margin:4px 0 6px 0; padding:4px 8px; border-left:2px solid #2a2e39; font-size:11px; color:var(--muted); }
+  .opt b { color:var(--ink); font-weight:500; }
+  .opt.top { border-left-color: var(--gold); }
+  .mem, .small { margin-top:4px; color:var(--muted); font-size:11px; }
+  pre.saw { background:#14161c; border:1px solid var(--line); border-radius:4px; padding:8px; font-size:10.5px; color:#b9bcc7; white-space:pre-wrap; margin:6px 0 0; max-height:260px; overflow:auto; }
+  .news div { font-size:11px; color:var(--muted); margin:2px 0; }
+  .news b { color:var(--ink); font-weight:500; }
   .events { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; color:var(--muted); font-size:11px; }
   .events div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .events .say { color:#c9c2a8; }
   .stats { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; color:var(--muted); font-size:11px; }
   .stats b { color:var(--ink); font-weight:500; }
+  .weather { color:#9fb8d8; }
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="c"></canvas></div>
+<div id="stage"><canvas id="c"></canvas><div id="hint">click the map to walk · click a villager to see why</div></div>
 <div id="panel">
   <h1>Village</h1>
   <div class="clock"><span id="hhmm">--:--</span><small id="label"></small></div>
@@ -50,141 +62,385 @@
     <button data-speed="4" class="speed">4×</button>
     <button data-brain="jev" class="brain">brain: jev</button>
     <button data-brain="random" class="brain">random</button>
+    <button id="wave" class="wave">👋 wave</button>
   </div>
   <div id="npcs"></div>
+  <h2>news · who knows</h2>
+  <div class="news" id="news"></div>
   <div class="events" id="events"></div>
   <div class="stats" id="stats"></div>
 </div>
 <script>
-const TILE = 26;
+const TILE = 28;
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-let map = null, state = null;
-const COLORS = { '.':'#4f7a3a', ':':'#8b7a55', '~':'#3a6ea5', '#':'#2f5a2a', 'H':'#6b4b3a', 'F':'#a68b3c' };
-const ROOF = '#8a4a3a';
-const smooth = {}; // npc id -> {x,y} eased positions
+ctx.imageSmoothingEnabled = false;
+let map = null, state = null, prevState = null, stateAt = 0, prevAt = 0, selected = null, tick = 0;
+let mapLayer = null; // pre-rendered static tiles
+const facing = {};   // npc id -> -1 (left) | 1 (right)
+const rain = Array.from({length: 160}, () => ({x: Math.random(), y: Math.random(), v: 0.6 + Math.random()*0.6}));
 
+// ---------------------------------------------------------------- network
 const ws = new WebSocket(`ws://${location.host}/ws`);
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
-  if (msg.type === 'map') { map = msg; canvas.width = map.w * TILE; canvas.height = map.h * TILE; }
-  else if (msg.type === 'state') { state = msg; renderPanel(); }
+  if (msg.type === 'map') { map = msg; canvas.width = map.w * TILE; canvas.height = map.h * TILE; mapLayer = renderMapLayer(); }
+  else if (msg.type === 'state') { prevState = state; prevAt = stateAt; state = msg; stateAt = performance.now(); renderPanel(); }
 };
 const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
 document.getElementById('pause').onclick = () => send({cmd:'pause'});
+document.getElementById('wave').onclick = () => send({cmd:'wave'});
 document.querySelectorAll('.speed').forEach(b => b.onclick = () => { send({cmd:'speed', value:+b.dataset.speed}); document.querySelectorAll('.speed').forEach(x=>x.classList.toggle('on', x===b)); });
 document.querySelectorAll('.brain').forEach(b => b.onclick = () => send({cmd:'brain', value:b.dataset.brain}));
 
-function drawMap() {
+// The panel re-renders 10x/s, so a `click` (mousedown + mouseup on the same node) can be lost
+// when the node is replaced in between. Delegate pointerdown on the container instead.
+document.getElementById('npcs').addEventListener('pointerdown', (e) => {
+  const card = e.target.closest('.npc'); if (!card) return;
+  selected = selected === card.dataset.id ? null : card.dataset.id; renderPanel();
+});
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!state || e.button !== 0) return;
+  const r = canvas.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (canvas.width / r.width), py = (e.clientY - r.top) * (canvas.height / r.height);
+  const pos = positions();
+  const hit = state.npcs.find(n => !n.controlled && Math.hypot(pos[n.id].cx - px, pos[n.id].cy - py) < 16);
+  if (hit) { selected = selected === hit.id ? null : hit.id; renderPanel(); return; }
+  send({cmd:'move', x: Math.floor(px / TILE), y: Math.floor(py / TILE)});
+});
+
+// ---------------------------------------------------------------- tiles (pre-rendered once)
+function rng(seed) { let t = seed + 0x6D2B79F5; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ t >>> 15, 1 | t); r ^= r + Math.imul(r ^ r >>> 7, 61 | r); return ((r ^ r >>> 14) >>> 0) / 4294967296; }; }
+const at = (x, y) => (map && y >= 0 && y < map.h && x >= 0 && x < map.w) ? map.rows[y][x] : '#';
+const isWall = (c) => c === 'H';
+const isDoor = (c) => 'abcdefTB'.includes(c);
+const isGround = (c) => '.:MWFabcdefTB'.includes(c);
+
+function renderMapLayer() {
+  const off = document.createElement('canvas'); off.width = map.w * TILE; off.height = map.h * TILE;
+  const g = off.getContext('2d'); g.imageSmoothingEnabled = false;
+  const rand = rng(7);
+  // pass 1: ground
   for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
-    const ch = map.rows[y][x];
-    let col = COLORS[ch] || COLORS['.'];
-    if ('abcdefTBWM'.includes(ch)) col = ch === 'W' ? '#5b6b7a' : '#a08a6a';
-    ctx.fillStyle = col; ctx.fillRect(x*TILE, y*TILE, TILE, TILE);
-    if (ch === 'H') { ctx.fillStyle = ROOF; ctx.fillRect(x*TILE+2, y*TILE+2, TILE-4, TILE-4); }
-    if (ch === '#') { ctx.fillStyle = '#3d7a34'; ctx.beginPath(); ctx.arc(x*TILE+TILE/2, y*TILE+TILE/2, TILE*0.36, 0, 7); ctx.fill(); }
-    if (ch === '~') { ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(x*TILE+4, y*TILE+TILE/2, TILE-8, 2); }
-    if (ch === 'F') { ctx.fillStyle = '#c9a94a'; for (let i=0;i<3;i++) ctx.fillRect(x*TILE+5+i*7, y*TILE+6, 2, TILE-12); }
-    if (ch === 'W') { ctx.fillStyle = '#2b3a4a'; ctx.beginPath(); ctx.arc(x*TILE+TILE/2, y*TILE+TILE/2, TILE*0.3, 0, 7); ctx.fill(); }
+    const ch = at(x, y), X = x*TILE, Y = y*TILE;
+    // grass everywhere as a base
+    g.fillStyle = '#5c8a3c'; g.fillRect(X, Y, TILE, TILE);
+    for (let i = 0; i < 5; i++) { g.fillStyle = rand() < 0.5 ? '#54803a' : '#66964a'; g.fillRect(X + (rand()*TILE|0), Y + (rand()*TILE|0), 2, 2); }
+    if (ch === ':' || ch === 'M' || isDoor(ch)) {
+      g.fillStyle = '#b39a6b'; g.fillRect(X, Y, TILE, TILE);
+      for (let i = 0; i < 6; i++) { g.fillStyle = rand() < 0.5 ? '#a68d5f' : '#c4ab7c'; g.fillRect(X + (rand()*(TILE-3)|0), Y + (rand()*(TILE-3)|0), 3, 2); }
+      // soft grass edge where the path meets grass
+      g.fillStyle = 'rgba(92,138,60,.55)';
+      if (at(x, y-1) === '.') g.fillRect(X, Y, TILE, 3);
+      if (at(x, y+1) === '.') g.fillRect(X, Y+TILE-3, TILE, 3);
+      if (at(x-1, y) === '.') g.fillRect(X, Y, 3, TILE);
+      if (at(x+1, y) === '.') g.fillRect(X+TILE-3, Y, 3, TILE);
+    }
+    if (ch === 'M') { // cobbles on the square
+      g.fillStyle = '#9d8760'; for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) g.fillRect(X + i*7 + 1, Y + j*7 + 1, 5, 5);
+    }
+    if (ch === 'F') {
+      g.fillStyle = '#7a5a2e'; g.fillRect(X, Y, TILE, TILE);
+      g.fillStyle = '#6a4c24'; for (let r = 0; r < 4; r++) g.fillRect(X, Y + r*7 + 5, TILE, 2);
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { g.fillStyle = rand() < 0.3 ? '#e2c05a' : '#cfa943'; g.fillRect(X + c*7 + 2, Y + r*7 + 1, 2, 5); g.fillStyle = '#f1d97a'; g.fillRect(X + c*7 + 2, Y + r*7 + 1, 2, 1); }
+    }
+    if (ch === '~') { g.fillStyle = '#3d78b4'; g.fillRect(X, Y, TILE, TILE); if (at(x,y-1) !== '~') { g.fillStyle = '#7fb2e0'; g.fillRect(X, Y, TILE, 2); } if (at(x,y+1) !== '~') { g.fillStyle = '#2d5f92'; g.fillRect(X, Y+TILE-2, TILE, 2); } }
+    if (ch === 'W') { g.fillStyle = '#9d8760'; g.fillRect(X, Y, TILE, TILE); }
   }
-  ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'center';
-  for (const p of map.places) {
-    if (p.kind === 'home') continue;
-    ctx.fillStyle = 'rgba(0,0,0,.55)';
-    const w = ctx.measureText(p.name).width + 8;
-    ctx.fillRect(p.x*TILE + TILE/2 - w/2, p.y*TILE - 16, w, 14);
-    ctx.fillStyle = '#f3efe2'; ctx.fillText(p.name, p.x*TILE + TILE/2, p.y*TILE - 5);
+  // pass 2: things that stand on the ground (trees, buildings), drawn top to bottom
+  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+    const ch = at(x, y), X = x*TILE, Y = y*TILE, cx = X + TILE/2, cy = Y + TILE/2;
+    if (ch === '#') {
+      g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(cx+2, cy+9, 11, 5, 0, 0, 7); g.fill();
+      g.fillStyle = '#4a3320'; g.fillRect(cx-2, cy+2, 4, 8);
+      g.fillStyle = '#2f6b2c'; g.beginPath(); g.arc(cx, cy-1, 11, 0, 7); g.fill();
+      g.fillStyle = '#3f8a37'; g.beginPath(); g.arc(cx-2, cy-4, 8, 0, 7); g.fill();
+      g.fillStyle = '#5aa64a'; g.beginPath(); g.arc(cx-4, cy-6, 4, 0, 7); g.fill();
+    }
+    if (isWall(ch)) {
+      const roof = !isWall(at(x, y-1));
+      if (roof) {
+        g.fillStyle = '#8b3f33'; g.fillRect(X, Y, TILE, TILE);
+        g.fillStyle = '#a5503f'; for (let r = 0; r < TILE; r += 6) g.fillRect(X, Y + r, TILE, 2);
+        g.fillStyle = '#6e2f26'; g.fillRect(X, Y + TILE - 3, TILE, 3);
+        if (!isWall(at(x-1, y))) { g.fillStyle = '#c0655a'; g.fillRect(X, Y, 3, TILE); }
+        if (!isWall(at(x+1, y))) { g.fillStyle = '#6e2f26'; g.fillRect(X + TILE - 3, Y, 3, TILE); }
+      } else {
+        g.fillStyle = '#d9c39a'; g.fillRect(X, Y, TILE, TILE);
+        g.fillStyle = '#5a3b26'; g.fillRect(X, Y, TILE, 2); g.fillRect(X, Y + TILE - 2, TILE, 2);
+        if (!isWall(at(x-1, y))) g.fillRect(X, Y, 2, TILE);
+        if (!isWall(at(x+1, y))) g.fillRect(X + TILE - 2, Y, 2, TILE);
+        // a window unless there's a door below
+        if (!isDoor(at(x, y+1))) { g.fillStyle = '#5a3b26'; g.fillRect(cx-6, cy-6, 12, 12); g.fillStyle = '#9fc7e8'; g.fillRect(cx-4, cy-4, 4, 4); g.fillRect(cx, cy-4, 4, 4); g.fillRect(cx-4, cy, 4, 4); g.fillRect(cx, cy, 4, 4); }
+      }
+    }
+    if (isDoor(ch)) {
+      // door in the wall above; this tile is the step
+      const wx = X, wy = Y - TILE;
+      g.fillStyle = '#5a3b26'; g.fillRect(wx + 8, wy + 8, 12, 20);
+      g.fillStyle = '#8a5a35'; g.fillRect(wx + 10, wy + 10, 8, 18);
+      g.fillStyle = '#e4b04a'; g.fillRect(wx + 16, wy + 20, 2, 2);
+      if (ch === 'T') { g.fillStyle = '#e4b04a'; g.beginPath(); g.arc(wx + 24, wy + 12, 3, 0, 7); g.fill(); } // tavern lantern
+      if (ch === 'B') { g.fillStyle = '#f3efe2'; g.fillRect(wx + 3, wy + 10, 5, 6); g.fillStyle = '#c9a94a'; g.fillRect(wx + 4, wy + 11, 3, 4); } // bread sign
+    }
+    if (ch === 'W') {
+      g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(cx, cy+8, 12, 5, 0, 0, 7); g.fill();
+      g.fillStyle = '#6f7580'; g.beginPath(); g.arc(cx, cy+2, 11, 0, 7); g.fill();
+      g.fillStyle = '#2a3f55'; g.beginPath(); g.arc(cx, cy+2, 7, 0, 7); g.fill();
+      g.fillStyle = '#5a3b26'; g.fillRect(cx-11, cy-12, 3, 16); g.fillRect(cx+8, cy-12, 3, 16);
+      g.fillStyle = '#8b3f33'; g.fillRect(cx-14, cy-15, 28, 4);
+    }
   }
+  return off;
 }
 
-function bubble(text, cx, cy, fill, ink, maxW) {
-  ctx.font = '11px ui-monospace, monospace';
-  const words = text.split(' '); const lines = []; let cur = '';
-  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
-  if (cur) lines.push(cur);
-  const w = Math.min(maxW, Math.max(...lines.map(l => ctx.measureText(l).width))) + 12;
-  const h = lines.length * 13 + 8;
-  const x = Math.max(2, Math.min(canvas.width - w - 2, cx - w/2)), y = cy - h - 6;
-  ctx.fillStyle = fill; ctx.strokeStyle = 'rgba(0,0,0,.4)';
-  ctx.beginPath(); ctx.roundRect(x, y, w, h, 5); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx-4, y+h); ctx.lineTo(cx, y+h+5); ctx.lineTo(cx+4, y+h); ctx.fill();
-  ctx.fillStyle = ink; ctx.textAlign = 'left';
-  lines.forEach((l, i) => ctx.fillText(l, x + 6, y + 13 + i*13));
-  ctx.textAlign = 'center';
+// ---------------------------------------------------------------- sprites (procedural pixel art)
+// 12x16 templates. H hair, S skin, E eye, T tunic, P pants, B boots, A hat (traveler), . empty
+const BODY = [
+  '....HHHH....','...HHHHHH...','...HSSSSH...','...SESSES...','...SSSSSS...','....SSSS....',
+  '...TTTTTT...','..TTTTTTTT..','.STTTTTTTTS.','.STTTTTTTTS.','...TTTTTT...','...TTTTTT...'];
+const LEGS = [
+  ['...PPPPPP...','...PP..PP...','...BB..BB...','............'],            // standing
+  ['...PPPPPP...','..PP....PP..','.BB......BB.','............'],            // stride
+  ['...PPPPPP...','...PP..PP...','....BBBB....','............'],            // pass
+];
+const HAT = ['.....A......','....AAA.....','...AAAAA....','..AAAAAAA...'];
+const spriteCache = {};
+function sprite(n, frame) {
+  const key = `${n.id}|${frame}`;
+  if (spriteCache[key]) return spriteCache[key];
+  const pal = palette(n);
+  const rows = (n.controlled ? HAT : []).concat(BODY, LEGS[frame]);
+  const c = document.createElement('canvas'); c.width = 12; c.height = rows.length;
+  const g = c.getContext('2d');
+  rows.forEach((row, y) => [...row].forEach((ch, x) => { if (ch !== '.') { g.fillStyle = pal[ch]; g.fillRect(x, y, 1, 1); } }));
+  return (spriteCache[key] = c);
+}
+function palette(n) {
+  const hair = {mira:'#e8c15a', bram:'#5a3b26', sela:'#7a2a2a', tom:'#d8d8d8', nell:'#2b2b2b', pip:'#c9652a', traveler:'#4a3320'}[n.id] || '#3b2a1a';
+  return { H: hair, S: '#f0c9a0', E: '#1b1b1b', T: n.color, P: n.id === 'pip' ? '#3a5a8a' : '#4a4a5a', B: '#3a2a1a', A: '#2f8f5f' };
 }
 
+// ---------------------------------------------------------------- positions: interpolate between snapshots
 function positions() {
-  // ease toward the server position; spread villagers who share a tile so nobody is hidden
+  // Render one snapshot behind and lerp toward the latest: smooth at any broadcast rate.
+  const now = performance.now();
+  const span = Math.max(1, stateAt - prevAt);
+  const a = prevState ? Math.min(1, (now - stateAt) / span) : 1;
+  const prev = Object.fromEntries((prevState ? prevState.npcs : []).map(n => [n.id, n]));
   const byTile = {};
+  const raw = {};
   for (const n of state.npcs) {
-    const s = smooth[n.id] || (smooth[n.id] = {x:n.x, y:n.y});
-    s.x += (n.x - s.x) * 0.25; s.y += (n.y - s.y) * 0.25;
+    const p = prev[n.id] || n;
+    const x = p.x + (n.x - p.x) * a, y = p.y + (n.y - p.y) * a;
+    if (Math.abs(n.x - p.x) > 0.01) facing[n.id] = n.x > p.x ? 1 : -1;
+    raw[n.id] = {x, y};
     const key = `${Math.round(n.x)},${Math.round(n.y)}`;
     (byTile[key] = byTile[key] || []).push(n.id);
   }
   const out = {};
   for (const ids of Object.values(byTile)) ids.forEach((id, i) => {
-    const s = smooth[id], k = ids.length;
-    const off = k > 1 ? (i - (k - 1) / 2) * 12 : 0;
-    out[id] = {cx: s.x*TILE + TILE/2 + off, cy: s.y*TILE + TILE/2 + (k > 1 ? (i % 2) * 5 : 0)};
+    const k = ids.length, off = k > 1 ? (i - (k - 1) / 2) * 13 : 0;
+    out[id] = {cx: raw[id].x*TILE + TILE/2 + off, cy: raw[id].y*TILE + TILE/2 + (k > 1 ? (i % 2) * 4 : 0)};
   });
   return out;
 }
 
+// ---------------------------------------------------------------- drawing
+function bubble(text, cx, cy, fill, ink, maxW) {
+  ctx.font = '11px ui-monospace, monospace';
+  const words = text.split(' '); const lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur);
+  const w = Math.min(maxW, Math.max(...lines.map(l => ctx.measureText(l).width))) + 14;
+  const h = lines.length * 13 + 9;
+  const x = Math.max(2, Math.min(canvas.width - w - 2, cx - w/2)), y = Math.max(2, cy - h - 8);
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;
+  ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx-5, y+h-1); ctx.lineTo(cx, y+h+6); ctx.lineTo(cx+5, y+h-1); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = ink; ctx.textAlign = 'left';
+  lines.forEach((l, i) => ctx.fillText(l, x + 7, y + 13 + i*13));
+  ctx.textAlign = 'center';
+}
+
+function drawWater() {
+  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) if (at(x, y) === '~') {
+    const X = x*TILE, Y = y*TILE;
+    ctx.fillStyle = 'rgba(255,255,255,.16)';
+    const ph = (tick/18 + x*0.9 + y*0.6);
+    ctx.fillRect(X + 4 + Math.sin(ph)*4, Y + 8, 10, 2);
+    ctx.fillRect(X + 12 + Math.cos(ph*0.8)*4, Y + 19, 8, 2);
+  }
+}
+
 function drawNpcs() {
   const pos = positions();
-  for (const n of state.npcs) {
+  const order = [...state.npcs].sort((a, b) => pos[a.id].cy - pos[b.id].cy); // painter's order
+  for (const n of order) {
     const {cx, cy} = pos[n.id];
-    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(cx, cy+9, 8, 4, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = n.color; ctx.beginPath(); ctx.arc(cx, cy, n.role === 'kid' ? 7 : 9, 0, 7); ctx.fill();
-    // mood: eyes tilt by Score 0..2
-    ctx.fillStyle = '#1b1b1b'; ctx.fillRect(cx-4, cy-2, 2, 2); ctx.fillRect(cx+2, cy-2, 2, 2);
-    ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.2; ctx.beginPath();
-    const m = (n.mood - 1); ctx.moveTo(cx-3, cy+3 - m*1.5); ctx.quadraticCurveTo(cx, cy+3 + m*3, cx+3, cy+3 - m*1.5); ctx.stroke();
-    if (n.deciding) { ctx.fillStyle = '#fff'; for (let i=0;i<3;i++) ctx.beginPath(), ctx.arc(cx-6+i*6, cy-16, 1.6, 0, 7), ctx.fill(); }
-    ctx.fillStyle = '#f3efe2'; ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'center';
-    ctx.fillText(n.name, cx, cy + 22);
+    const scale = n.role === 'kid' ? 2 : 2.4;
+    const frame = n.moving ? (Math.floor(tick / 7) % 2 ? 1 : 2) : 0;
+    const img = sprite(n, frame);
+    const w = img.width * scale, h = img.height * scale;
+    const idle = n.moving ? 0 : Math.sin(tick / 30 + cx) * 0.6;
+    ctx.globalAlpha = n.asleep ? 0.55 : 1;
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(cx, cy + 12, w*0.38, 4, 0, 0, 7); ctx.fill();
+    ctx.save(); ctx.translate(cx, cy + 12 - h + idle);
+    if ((facing[n.id] || 1) < 0) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(img, -w/2 * ((facing[n.id] || 1) < 0 ? -1 : 1) - (((facing[n.id] || 1) < 0) ? w : 0), 0, w, h);
+    ctx.restore();
+    if (selected === n.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(cx, cy + 12, w*0.5, 6, 0, 0, 7); ctx.stroke(); }
+    if (n.deciding) { ctx.fillStyle = '#fff'; for (let i=0;i<3;i++) { const ph = (tick/6 + i) % 3; ctx.globalAlpha = ph < 1 ? 1 : 0.35; ctx.beginPath(); ctx.arc(cx-6+i*6, cy - h + 4, 1.7, 0, 7); ctx.fill(); } ctx.globalAlpha = 1; }
+    if (n.knows.length) { ctx.fillStyle = '#e4b04a'; ctx.beginPath(); ctx.arc(cx+11, cy-h+14, 4.5, 0, 7); ctx.fill(); ctx.fillStyle = '#1b1b1b'; ctx.font = 'bold 8px ui-monospace'; ctx.textAlign = 'center'; ctx.fillText(n.knows.length, cx+11, cy-h+17); }
+    ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
+    const lw = ctx.measureText(n.name).width + 6;
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(cx - lw/2, cy + 15, lw, 12);
+    ctx.fillStyle = '#f3efe2'; ctx.fillText(n.name, cx, cy + 24);
+    ctx.globalAlpha = 1;
   }
+  // Bubbles: collect every bubble, then lay them out so none overlap (speech has priority,
+  // then thoughts left to right; a bubble that would collide is pushed up).
+  const wanted = [];
   for (const n of state.npcs) {
     const {cx, cy} = pos[n.id];
-    if (n.bubble) bubble(n.bubble, cx, cy - 12, '#f7f3e8', '#1b1b1b', 170);
-    else if (!n.talking_to && n.action && Object.keys(n.probs).length) {
-      const [top, p] = Object.entries(n.probs)[0];
-      bubble(`${n.action_label} · ${Math.round(p*100)}%`, cx, cy - 12, 'rgba(20,22,28,.85)', '#d7d3c6', 190);
+    if (n.bubble) { wanted.push({n, cx, cy, text: n.bubble, fill: '#f7f3e8', ink: '#1b1b1b', w: 190, pri: 0}); continue; }
+    let text = null, ink = '#d7d3c6', w = 190;
+    if (n.asleep) { text = 'z z z'; ink = '#9fb8d8'; w = 60; }
+    else if (n.talking_to) { text = '…'; w = 40; }
+    else if (!n.controlled && n.action && Object.keys(n.probs).length) { const [, p] = Object.entries(n.probs)[0]; text = `${n.action_label} · ${Math.round(p*100)}%`; w = 260; }
+    if (text) wanted.push({n, cx, cy, text, fill: 'rgba(20,22,28,.82)', ink, w, pri: 1});
+  }
+  wanted.sort((a, b) => a.pri - b.pri || a.cx - b.cx);
+  const placed = [...labelRects];
+  for (const b of wanted) {
+    if (b.pri === 1 && wanted.some(o => o !== b && o.pri === 1 && Math.abs(o.cx - b.cx) < 40 && Math.abs(o.cy - b.cy) < 30)) b.text = `${b.n.name}: ${b.text}`;
+    const box = bubbleBox(b.text, b.cx, b.cy - 26, b.w);
+    let lift = 0;
+    for (let tries = 0; tries < 12; tries++) {
+      const r = {x: box.x, y: box.y - lift, w: box.w, h: box.h};
+      const hit = placed.find(q => r.x < q.x + q.w && r.x + r.w > q.x && r.y < q.y + q.h + 4 && r.y + r.h + 4 > q.y);
+      if (!hit) { placed.push(r); bubble(b.text, b.cx, b.cy - 26 - lift, b.fill, b.ink, b.w); break; }
+      lift = (box.y + box.h) - hit.y + 6;  // move just above the bubble we hit
     }
   }
 }
 
-function frame() {
-  if (map) {
-    drawMap();
-    if (state) {
-      drawNpcs();
-      const dark = 1 - state.clock.daylight;
-      if (dark > 0) { ctx.fillStyle = `rgba(10,14,40,${dark*0.55})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+function bubbleBox(text, cx, cy, maxW) {
+  ctx.font = '11px ui-monospace, monospace';
+  const words = text.split(' '); const lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur);
+  const w = Math.min(maxW, Math.max(...lines.map(l => ctx.measureText(l).width))) + 14, h = lines.length * 13 + 9;
+  return {x: Math.max(2, Math.min(canvas.width - w - 2, cx - w/2)), y: Math.max(2, cy - h - 8), w, h};
+}
+
+function drawLabelsAndLight() {
+  const dark = 1 - state.clock.daylight;
+  if (dark > 0.2) {
+    for (const p of map.places) {
+      if (p.kind !== 'home') continue;
+      const inside = state.npcs.some(n => n.asleep && Math.round(n.x) === p.x && Math.round(n.y) === p.y);
+      if (!inside) continue;
+      const wx = (p.x-1)*TILE + TILE/2, wy = (p.y-2)*TILE + TILE/2, wx2 = (p.x+1)*TILE + TILE/2;
+      ctx.fillStyle = `rgba(255,200,90,${0.85*dark})`; ctx.fillRect(wx-4, wy-4, 8, 8); ctx.fillRect(wx2-4, wy-4, 8, 8);
+      const gl = ctx.createRadialGradient(wx, wy, 2, wx, wy, 30); gl.addColorStop(0, `rgba(255,200,90,${0.35*dark})`); gl.addColorStop(1, 'rgba(255,200,90,0)');
+      ctx.fillStyle = gl; ctx.fillRect(wx-30, wy-30, 60, 60);
     }
+  }
+}
+
+let labelRects = [];
+function drawPlaceLabels() {
+  labelRects = [];
+  ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'center';
+  for (const p of map.places) {
+    if (p.kind === 'home') continue;
+    const w = ctx.measureText(p.name).width + 10, X = p.x*TILE + TILE/2, Y = p.y*TILE - (p.kind === 'well' ? 24 : 18);
+    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.roundRect(X - w/2, Y - 11, w, 15, 3); ctx.fill();
+    ctx.fillStyle = '#f3efe2'; ctx.fillText(p.name, X, Y);
+    labelRects.push({x: X - w/2, y: Y - 11, w, h: 15});
+  }
+}
+
+function drawWeather() {
+  const dark = 1 - state.clock.daylight;
+  const h = parseInt(state.clock.hhmm) + parseInt(state.clock.hhmm.slice(3)) / 60;
+  const dusk = h > 16.5 && h < 20 ? Math.sin((h - 16.5) / 3.5 * Math.PI) : h > 5 && h < 7.5 ? Math.sin((h - 5) / 2.5 * Math.PI) : 0;
+  if (dusk > 0) { ctx.fillStyle = `rgba(255,140,60,${dusk*0.18})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+  if (dark > 0) { ctx.fillStyle = `rgba(12,16,48,${dark*0.55})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+  if (state.weather === 'raining') {
+    ctx.fillStyle = 'rgba(40,60,90,.22)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(200,220,255,.5)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (const d of rain) { d.y = (d.y + d.v * 0.02) % 1; const x = d.x*canvas.width, y = d.y*canvas.height; ctx.moveTo(x, y); ctx.lineTo(x-2, y+9); }
+    ctx.stroke();
+  }
+}
+
+function frame() {
+  tick++;
+  if (map && state && mapLayer) {
+    ctx.drawImage(mapLayer, 0, 0);
+    drawWater();
+    drawPlaceLabels();
+    drawNpcs();
+    drawLabelsAndLight();
+    drawWeather();
   }
   requestAnimationFrame(frame);
 }
 frame();
 
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function npcCard(n) {
+  const sel = selected === n.id;
+  const probs = Object.entries(n.all_probs).sort((a,b) => b[1]-a[1]);
+  const shown = sel ? probs : probs.slice(0, 3);
+  const top = probs[0] ? probs[0][0] : null;
+  return `
+    <div class="npc ${sel ? 'sel' : ''}" data-id="${n.id}">
+      <div class="head"><span class="dot" style="background:${n.color}"></span><span class="name">${n.name}</span><span class="role">${esc(n.role)} · ${n.traits.join(', ')}</span></div>
+      <div class="doing">${esc(n.action_label)}${n.deciding ? ' <span style="color:#8b8f9c">· thinking…</span>' : ''}</div>
+      ${n.controlled ? `<div class="mem">${n.memory.slice(-3).map(m => '· ' + esc(m)).join('<br>')}</div>` : `
+      <div class="needs">${Object.entries(n.needs_words).map(([k,v]) => `<span>${k} <b>${v}</b></span>`).join('')} <span>mood <b>${n.mood.toFixed(1)}</b></span>${n.knows.length ? `<span>knows <b>${n.knows.length}</b> news</span>` : ''}</div>
+      <div class="probs">${shown.map(([k,p]) => sel
+        ? `<div class="opt ${k===top?'top':''}"><b>${k}</b> · ${p.toFixed(2)}<br>${esc(n.options[k] || '')}</div>`
+        : `<div class="bar ${k===top?'top':''}"><span class="lab">${k}</span><span class="track"><span class="fill" style="width:${Math.round(p*100)}%"></span></span><span class="val">${p.toFixed(2)}</span></div>`).join('')}
+        ${probs.length ? `<div class="bar"><span class="lab">confidence</span><span class="track"><span class="fill" style="width:${Math.round(n.confidence*100)}%;background:#8b8f9c"></span></span><span class="val">${n.confidence.toFixed(2)}</span></div>` : ''}
+      </div>
+      ${sel ? `
+        <div class="small">remembers:<br>${n.memory.map(m => '· ' + esc(m)).join('<br>') || '—'}</div>
+        ${n.knows.length ? `<div class="small">has heard:<br>${n.knows.map(m => '· ' + esc(m)).join('<br>')}</div>` : ''}
+        ${Object.keys(n.affinity).length ? `<div class="small">gets along with: ${Object.entries(n.affinity).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `${k} ${v.toFixed(1)}`).join(', ')}</div>` : ''}
+        <div class="small">what Jev saw about ${n.name}:</div>
+        <pre class="saw">${esc(JSON.stringify(sawOf(n), null, 1))}</pre>`
+      : `<div class="mem">${n.memory.slice(-2).map(m => '· ' + esc(m)).join('<br>')}</div>`}`}
+    </div>`;
+}
+
+function sawOf(n) {
+  // reconstruct the villager slice of the state (mirrors NPC.describe on the server)
+  const d = { role: n.role, traits: n.traits, feels: n.needs_words, doing: n.action_label, recently: n.memory };
+  if (n.knows.length) d.has_heard = n.knows.slice(-3);
+  const friends = Object.entries(n.affinity).filter(([,v]) => v >= 0.4).map(([k]) => k);
+  if (friends.length) d.gets_along_with = friends;
+  return d;
+}
+
 function renderPanel() {
   document.getElementById('hhmm').textContent = state.clock.hhmm;
-  document.getElementById('label').textContent = state.clock.label + (state.paused ? ' · paused' : '');
+  document.getElementById('label').innerHTML = esc(state.clock.label) + (state.weather === 'raining' ? ' <span class="weather">· raining</span>' : '') + (state.paused ? ' · paused' : '');
   document.getElementById('pause').textContent = state.paused ? 'resume' : 'pause';
   document.querySelectorAll('.brain').forEach(b => b.classList.toggle('on', b.dataset.brain === state.brain.name));
-  document.getElementById('npcs').innerHTML = state.npcs.map(n => `
-    <div class="npc">
-      <div class="head"><span class="dot" style="background:${n.color}"></span><span class="name">${n.name}</span><span class="role">${n.role} · ${n.traits.join(', ')}</span></div>
-      <div class="doing">${n.action_label}${n.deciding ? ' <span style="color:#8b8f9c">· thinking…</span>' : ''}</div>
-      <div class="needs">${Object.entries(n.needs_words).map(([k,v]) => `<span>${k} <b>${v}</b></span>`).join('')} <span>mood <b>${n.mood.toFixed(1)}</b></span></div>
-      <div class="probs">${Object.entries(n.probs).map(([k,p],i) => `
-        <div class="bar ${i===0?'top':''}"><span class="lab">${k}</span><span class="track"><span class="fill" style="width:${Math.round(p*100)}%"></span></span><span class="val">${p.toFixed(2)}</span></div>`).join('')}
-        ${n.probs && Object.keys(n.probs).length ? `<div class="bar"><span class="lab">confidence</span><span class="track"><span class="fill" style="width:${Math.round(n.confidence*100)}%;background:#8b8f9c"></span></span><span class="val">${n.confidence.toFixed(2)}</span></div>` : ''}
-      </div>
-      <div class="mem">${n.memory.slice(-3).map(m => '· ' + m).join('<br>')}</div>
-    </div>`).join('');
-  document.getElementById('events').innerHTML = state.events.slice().reverse().map(e => `<div>${e}</div>`).join('');
+  const el = document.getElementById('npcs');
+  el.innerHTML = state.npcs.map(npcCard).join('');
+  const names = Object.fromEntries(state.npcs.map(n => [n.id, n.name]));
+  document.getElementById('news').innerHTML = state.news.length
+    ? state.news.slice().reverse().map(item => `<div><b>${esc(item.text)}</b> <span>(${item.since})</span><br>known by: ${item.knows.map(id => names[id] || id).join(', ') || 'nobody yet'}</div>`).join('')
+    : '<div>nothing has happened yet</div>';
+  document.getElementById('events').innerHTML = state.events.slice().reverse().map(e => `<div class="${e.includes(': "') ? 'say' : ''}">${esc(e)}</div>`).join('');
   const b = state.brain, nr = state.narrator;
   document.getElementById('stats').innerHTML =
     `brain <b>${b.name}</b> · <b>${b.requests}</b> requests · <b>${b.input_tokens.toLocaleString()}</b> tokens · <b>$${b.cost_usd.toFixed(4)}</b>${b.errors ? ` · ${b.errors} errors` : ''}<br>` +

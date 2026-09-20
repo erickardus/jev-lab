@@ -47,14 +47,22 @@ class TemplateNarrator:
 
     async def converse(self, a, b, topic, world):
         self.calls += 1
-        lines = self.LINES.get(topic, ["Hello.", "Hello yourself."])
+        if topic.startswith("news:"):
+            news = topic[5:]
+            lines = [f"Did you hear? {news}", "No! When?", "This morning, they say."]
+        elif b.controlled or a.controlled:
+            lines = ["You're new here, aren't you?", "Just passing through.", "Well. The tavern's that way."]
+        else:
+            lines = self.LINES.get(topic, ["Hello.", "Hello yourself."])
         return [(a.name if i % 2 == 0 else b.name, line) for i, line in enumerate(lines)]
 
 
 class ClaudeNarrator:
     name = "claude"
 
-    def __init__(self, model: str = "claude-opus-5") -> None:
+    # Short in-character lines are a small job: Haiku answers in ~1 s at a fraction of the
+    # cost. Pass a bigger model when the writing matters more than the latency.
+    def __init__(self, model: str = "claude-haiku-4-5") -> None:
         import anthropic  # optional dependency path; imported here so the sim runs without a key
 
         self.client = anthropic.AsyncAnthropic()
@@ -73,18 +81,18 @@ class ClaudeNarrator:
     async def converse(self, a, b, topic, world):
         import anthropic
 
+        topic_text = TOPICS.get(topic, topic[5:] + " (news one of them just heard; the other hasn't)" if topic.startswith("news:") else topic)
         prompt = (
-            f"Time: {world.clock.label()}.\n"
-            f"{a.name}, {a.role}, traits {', '.join(a.traits)}, feels {a.describe(world)['feels']}, remembers {list(a.memory)}.\n"
-            f"{b.name}, {b.role}, traits {', '.join(b.traits)}, feels {b.describe(world)['feels']}, remembers {list(b.memory)}.\n"
-            f"Topic: {TOPICS.get(topic, topic)}. {a.name} speaks first."
+            f"Time: {world.clock.label()}. Weather: {world.weather}.\n"
+            f"{a.name}, {a.role}, traits {', '.join(a.traits)}, feels {a.describe(world).get('feels', 'fine')}, remembers {list(a.memory)}.\n"
+            f"{b.name}, {b.role}, traits {', '.join(b.traits)}, feels {b.describe(world).get('feels', 'fine')}, remembers {list(b.memory)}.\n"
+            f"Topic: {topic_text}. {a.name} speaks first."
         )
         try:
             resp = await self.client.messages.create(
                 model=self.model,
                 max_tokens=300,
                 system=self.SYSTEM,
-                output_config={"effort": "low"},
                 messages=[{"role": "user", "content": prompt}],
             )
         except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:

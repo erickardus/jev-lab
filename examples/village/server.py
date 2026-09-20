@@ -1,7 +1,7 @@
 """Village: a tiny top-down world whose people are driven by Jev, watched from a browser.
 
   uv run examples/village/server.py                # http://127.0.0.1:8765
-  uv run examples/village/server.py --narrator claude   # Claude writes the dialogue (needs ANTHROPIC_API_KEY)
+  uv run examples/village/server.py --narrator template # canned dialogue (default is Claude when ANTHROPIC_API_KEY is set)
   uv run examples/village/server.py --brain random       # no Jev; sanity-check the world itself
   uv run examples/village/server.py --headless 60        # run 60 sim-seconds, print the event log, exit
 
@@ -38,16 +38,15 @@ STEP = 0.05  # sim step in seconds (20 Hz)
 BROADCAST_HZ = 10
 
 
-def make_sim(brain_name: str, narrator_name: str, model: str | None) -> Sim:
+def make_sim(brain_name: str, narrator_name: str, model: str | None, narrator_model: str | None = None) -> Sim:
     brain = JevBrain(model) if brain_name == "jev" else RandomBrain()
-    if narrator_name == "claude":
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            print("--narrator claude needs ANTHROPIC_API_KEY; using templates", file=sys.stderr)
-            narrator = TemplateNarrator()
-        else:
-            narrator = ClaudeNarrator()
-    else:
-        narrator = TemplateNarrator()
+    have_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if narrator_name == "auto":
+        narrator_name = "claude" if have_key else "template"
+    if narrator_name == "claude" and not have_key:
+        print("--narrator claude needs ANTHROPIC_API_KEY; using templates", file=sys.stderr)
+        narrator_name = "template"
+    narrator = ClaudeNarrator(narrator_model) if narrator_name == "claude" and narrator_model else ClaudeNarrator() if narrator_name == "claude" else TemplateNarrator()
     return Sim(brain, narrator)
 
 
@@ -112,7 +111,11 @@ def build_app(sim: Sim):
             while True:
                 raw = await websocket.receive_text()
                 cmd = json.loads(raw)
-                if cmd.get("cmd") == "pause":
+                if cmd.get("cmd") == "move":
+                    sim.move_player(int(cmd["x"]), int(cmd["y"]))
+                elif cmd.get("cmd") == "wave":
+                    sim.player_wave()
+                elif cmd.get("cmd") == "pause":
                     sim.paused = not sim.paused
                 elif cmd.get("cmd") == "speed":
                     sim.speed = float(cmd.get("value", 1.0))
@@ -133,12 +136,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--brain", choices=["jev", "random"], default="jev")
-    ap.add_argument("--narrator", choices=["template", "claude"], default="template")
+    ap.add_argument("--narrator", choices=["auto", "template", "claude"], default="auto", help="auto = claude when ANTHROPIC_API_KEY is set")
     ap.add_argument("--model", default=None, help="Jev model id (default jev-latest)")
+    ap.add_argument("--narrator-model", default=None, help="Claude model for dialogue (default claude-haiku-4-5)")
     ap.add_argument("--headless", type=float, metavar="SECONDS", help="run without a server and print the log")
     args = ap.parse_args()
 
-    sim = make_sim(args.brain, args.narrator, args.model)
+    sim = make_sim(args.brain, args.narrator, args.model, args.narrator_model)
     if args.headless:
         asyncio.run(run_headless(sim, args.headless))
         return 0

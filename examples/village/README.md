@@ -11,19 +11,42 @@ gossip", and Bram — starving but hardworking — is torn between the field (44
 bread (30%) at confidence 0.39. Every bubble over a head is Jev's top choice and its
 probability; the panel shows the whole distribution.
 
+![night in the village](screenshot-night.jpg)
+
+Night: Sela is asleep with her windows lit, the tavern crowd's thoughts stack without
+overlapping, and Old Tom is 70% "staying put" because of course he is.
+
+![why Bram is in the field](screenshot-why.jpg)
+
+Click a villager and the panel shows what Jev was actually asked: every available action
+in the words it was described with — "Walk to the bakery (a short walk away) for bread;
+sells bread in the morning, open; Mira is here" — and the probability it got.
+
 ## How to run
 
 ```
-uv run examples/village/server.py                      # open http://127.0.0.1:8765
-uv run examples/village/server.py --narrator claude    # Claude writes the dialogue (needs ANTHROPIC_API_KEY in .env)
-uv run examples/village/server.py --brain random       # no Jev: sanity-check the world itself
-uv run examples/village/server.py --headless 120       # 120 sim-seconds, no browser, prints the event log
+uv run examples/village/server.py                          # open http://127.0.0.1:8765
+uv run examples/village/server.py --narrator template      # canned dialogue (default is Claude when ANTHROPIC_API_KEY is set)
+uv run examples/village/server.py --narrator-model claude-sonnet-5   # bigger model for the dialogue
+uv run examples/village/server.py --brain random           # no Jev: sanity-check the world itself
+uv run examples/village/server.py --headless 120           # 120 sim-seconds, no browser, prints the event log
 ```
 
-Controls in the page: pause, 1×/2×/4× speed, and a live switch between the Jev brain and
-a random one — the fastest way to see what Jev adds. Needs `TYPESAFE_API_KEY` in `.env`.
-The server keeps both API keys; the browser only receives world snapshots over a
-WebSocket.
+In the page:
+
+- **Click the map** to walk. You are the traveler (green, pointed hat). Villagers see
+  "a traveler passing through, new to the village" in their state and may come greet you.
+- **👋 wave** — nearby villagers remember "the traveler waved at me".
+- **Click a villager** (on the map or in the panel) to see *why*: every option Jev was
+  offered, in the exact words it was given, with its probability; their memory; what news
+  they've heard; who they get along with.
+- pause · 1×/2×/4× · a live **jev ↔ random** brain switch, the fastest way to see what
+  Jev adds.
+
+Needs `TYPESAFE_API_KEY` in `.env`; `ANTHROPIC_API_KEY` turns on Claude dialogue
+(`claude-haiku-4-5` by default — short in-character lines are a small job, and Haiku
+answers in about a second). The server keeps both keys; the browser only receives world
+snapshots over a WebSocket.
 
 ## Example response
 
@@ -54,6 +77,25 @@ Nobody scripted "everyone goes to the tavern at noon", "the nosy innkeeper gossi
 needs described in words plus one Choice question per villager. Cost for that run: 23
 requests, 47k input tokens, $0.002 — roughly 7¢ per real hour at 1× speed.
 
+## What happens in the village
+
+- **Needs** (hunger, energy, social) rise over time and are described to Jev in words;
+  actions bring them down. Around noon everyone drifts to the tavern; at night they go home
+  and the windows light up.
+- **Weather.** Rain starts and stops. The field is "muddy in the rain", a `shelter` action
+  appears, and villagers remember "it started raining".
+- **News.** Every minute or two something happens — the well rope snaps, a fox gets into
+  the henhouse, a boat is seen on the river — and whoever is at the right place sees it.
+  When two villagers talk, a speculative Jev `Noul` ("would they pass on what they've
+  heard?") decides whether the news spreads; the listener learns it and remembers who told
+  them. The **news · who knows** panel and the gold badge on each villager show the
+  propagation. Gossipy villagers spread news; quiet ones sit on it.
+- **Relationships.** Each conversation adds affinity; friends appear in the state as
+  "gets along with", so pairs that have talked tend to seek each other out again.
+- **You.** The traveler is an NPC with no brain and no needs. Villagers get a
+  `talk_to_traveler` option when you're close ("a stranger new to the village"), and Claude
+  writes the greeting when one of them comes over.
+
 ## How it works
 
 ```
@@ -69,7 +111,8 @@ sim/narrator.py  Narrator protocol. TemplateNarrator: canned lines. ClaudeNarrat
 sim/engine.py    the loop: movement, needs, arrivals, conversations, batching idle villagers
                  into a brain request without ever blocking the world on it
 server.py        FastAPI + WebSocket; streams snapshots at 10 Hz; serves static/index.html
-static/index.html  canvas renderer, thought bubbles, speech bubbles, the side panel
+static/index.html  canvas renderer: pre-rendered tile layer, procedural pixel sprites with walk
+                 cycles and facing, snapshot interpolation, non-overlapping bubble layout, the side panel
 ```
 
 ### What Jev sees
@@ -110,8 +153,10 @@ the narrator's job, and it is the only place a generative model is called:
 | what mood are they in, what would they talk about | Jev | same request | free |
 | the actual lines of a conversation | LLM (or templates) | a few times a minute, village-wide | a second is fine; bubbles are queued |
 
-`--narrator claude` uses `claude-opus-5` at low effort for 2–4 short lines, given both
-villagers' traits, feelings, and memories. The `Narrator` protocol is where later
+With `ANTHROPIC_API_KEY` set, the narrator uses `claude-haiku-4-5` for 2–4 short lines,
+given both villagers' traits, feelings, memories, the weather, and the topic (or the news
+being passed on). Haiku answers in about a second at roughly $0.0006 per conversation;
+`--narrator-model` swaps in a bigger model when the writing matters more than latency. The `Narrator` protocol is where later
 generative behaviors plug in: a rumor that mutates as it passes from mouth to mouth, a
 notice pinned to the square, a villager naming a new dish.
 
@@ -123,6 +168,46 @@ how many memories a villager keeps, when the tavern and bakery are open (`world.
 far someone will chase a moving conversation partner before giving up (`engine.py`).
 Traits are plain strings; add `"afraid of the well"` to Old Tom and watch the
 `fetch_water` probability change without changing any code.
+
+## Things Jev taught us while building it (round two)
+
+- **Actions must live on the villager, not in a shared registry.** Caching `talk_to_pip`
+  globally offered it to everyone, including Pip. "Pip talking with Pip" was the symptom.
+- **A speculative answer is per-villager; a conversation is shared.** Same lesson as the
+  topic, now for news: the *speaker's* `share_news` decides, and both sides record the same
+  outcome.
+- **A slow narrator must not outlive the conversation.** Opus took ~5 s; the queued lines
+  ran past the 14 s conversation window. The conversation now extends to cover its lines,
+  and Haiku made the problem mostly moot.
+- **Re-rendering a panel 10×/s eats clicks.** `mousedown` on a node that is replaced before
+  `mouseup` never becomes a `click`. Delegated `pointerdown` on the container fixed it, and
+  the canvas uses `pointerdown` too.
+
+## Rendering notes
+
+No engine, no dependencies: one `<canvas>` and ~400 lines. Choices that made it look like
+a game rather than a diagram:
+
+- **Interpolate, don't ease.** The server broadcasts at 10 Hz. Easing toward the latest
+  position lurches; rendering one snapshot behind and lerping between the last two is
+  smooth at 60 fps at the cost of 100 ms of latency nobody notices.
+- **Pre-render the map once** to an offscreen canvas (textured grass, path edges, gabled
+  roofs with windows and doors, trees with shadows, wheat rows). Per frame only water
+  shimmer, sprites, bubbles, and light are drawn.
+- **Procedural pixel sprites.** A 12×16 character template with palette keys (hair, skin,
+  tunic, pants, boots, hat) rendered per villager and cached; two leg frames for the walk
+  cycle, horizontal flip for facing, painter's order by y so nearer villagers overlap
+  farther ones.
+- **Bubbles are laid out, not just drawn.** Every bubble is collected first, then placed
+  greedily (speech before thoughts, left to right); one that would overlap a placed bubble
+  or a place label is pushed above it, and villagers who share a spot get their name
+  prefixed.
+- **Light.** Dusk and dawn tint warm, night tints blue; a sleeping villager's windows glow.
+
+When this wants real art, the step up is a 2D engine (PixiJS or Phaser) with a proper
+tileset and sprite sheets, not a 3D one; three.js only makes sense if the village goes
+isometric or 3D, which is an art decision more than a rendering one. The simulation
+doesn't care: anything that reads the WebSocket snapshot can render it.
 
 ## Building on it
 

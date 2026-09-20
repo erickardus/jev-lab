@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from typesafe_sdk import AsyncTypeSafeClient, Choice, Score
+from typesafe_sdk import AsyncTypeSafeClient, Choice, Noul, Score
 
 from .actions import Action
 from .npc import NPC
@@ -38,6 +38,7 @@ class Decision:
     confidence: float
     mood: float = 1.0
     topic: str | None = None
+    share_news: float = 0.0
 
 
 @dataclass
@@ -70,7 +71,7 @@ class RandomBrain:
         for n in npcs:
             acts = options[n.id]
             pick = self.rng.choice(acts)
-            out[n.id] = Decision(pick.id, {a.id: (0.6 if a is pick else 0.4 / max(1, len(acts) - 1)) for a in acts}, 0.2, 1.0, self.rng.choice(list(TOPICS)))
+            out[n.id] = Decision(pick.id, {a.id: (0.6 if a is pick else 0.4 / max(1, len(acts) - 1)) for a in acts}, 0.2, 1.0, self.rng.choice(list(TOPICS)), self.rng.random())
         return out
 
 
@@ -82,11 +83,16 @@ class JevBrain:
         self.usage = Usage()
 
     def _state(self, world: World, deciding: list[NPC]) -> dict:
-        return {
+        st = {
             "time": f"{world.clock.hhmm()}, {world.clock.label()}",
-            "villagers": {n.id: n.describe(world) for n in world.npcs},
+            "weather": world.weather,
+            "villagers": {n.id: n.describe(world) for n in world.npcs if not n.controlled},
             "places": {p.name: p.describe(world) for p in world.places.values() if p.kind != "home"},
         }
+        trav = next((n for n in world.npcs if n.controlled), None)
+        if trav:
+            st["traveler"] = trav.describe(world)
+        return st
 
     def _questions(self, world: World, deciding: list[NPC], options: dict[str, list[Action]]) -> dict:
         qs: dict = {}
@@ -107,6 +113,15 @@ class JevBrain:
                     "Cheerful: rested, fed, in good company, or something recently went well",
                 ],
             )
+            if n.knows:
+                # Speculative: read only if they end up in a conversation while knowing news.
+                qs[f"share|{n.id}"] = Noul(
+                    instructions=f"If `villagers.{n.id}` chats with someone now, they would pass on the news they have heard (`villagers.{n.id}.has_heard`)",
+                    criteria={
+                        "true": "Their traits and mood make them likely to bring up what they heard",
+                        "false": "They are the kind to keep it to themselves, or are too tired or preoccupied to bother",
+                    },
+                )
             if any(a.id.startswith("talk_to_") for a in acts):
                 # Speculative: only used if they end up in a conversation. Same request, no extra latency.
                 qs[f"topic|{n.id}"] = Choice(
@@ -126,7 +141,8 @@ class JevBrain:
             act = resp.choices[f"act|{n.id}"]
             mood = resp.scores[f"mood|{n.id}"].score
             topic = resp.choices[f"topic|{n.id}"].choice if f"topic|{n.id}" in resp.choices else None
-            out[n.id] = Decision(act.choice, dict(act.probabilities), act.confidence, mood, topic)
+            share = resp.nouls[f"share|{n.id}"].noul if f"share|{n.id}" in resp.nouls else 0.0
+            out[n.id] = Decision(act.choice, dict(act.probabilities), act.confidence, mood, topic, share)
         return out
 
     async def close(self) -> None:

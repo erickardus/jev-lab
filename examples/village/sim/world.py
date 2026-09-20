@@ -57,6 +57,8 @@ class Place:
             base += ", open" if 6 <= world.clock.hour < 14 else ", closed"
         if here:
             base += "; " + ", ".join(here) + (" is" if len(here) == 1 else " are") + " here"
+        if self.kind == "field" and world.weather == "raining":
+            base += "; muddy in the rain"
         return base
 
 
@@ -113,7 +115,10 @@ class World:
         self.clock = Clock()
         self.places: dict[str, Place] = {}
         self.npcs: list = []  # filled by the simulation
+        self.by_id: dict = {}
         self.events: list[str] = []
+        self.weather: str = "clear"
+        self.news: list[dict] = []  # {"text", "at", "since"}
         self._index_places()
 
     # ------------------------------------------------------------------ places
