@@ -66,72 +66,82 @@ clarifying question, a failed edit, a test loosened and then corrected by the de
 ("we regenerate fixtures with the invoice-fixtures skill, that's how we always do it
 here"), and ends with the integration suite not run.
 
-> The report below is the shape the tool produces. This branch was written on a machine
-> without a `TYPESAFE_API_KEY`, so the Jev numbers in it come from a stub that stood in for
-> Jev during development; the counted facts are real. Run `--fixture` with a key and
-> replace this block with what you get.
+Running `--fixture` (real Jev, 6 requests, 1.6 s, $0.0002):
 
 ```
 # Retro: Fix failing invoice parser tests
 
 2026-09-18 14:02 · 3 prompt(s) · 30 assistant turns · 26 tool steps · 16.7 min · claude-opus-5
 
-**Prompt 3.2/10 · Agent 4.1/10 · Outcome 7.7/10**
+Prompt 4.2/10 · Agent 4.3/10 · Outcome 6.2/10
 
 > fix the bug in the parser, tests are failing
 
 ## Your prompt
 
-- 🔴 The opening prompt did not say what you wanted — goal 0.3/2
+- 🔴 The opening prompt did not say what you wanted — goal 0.9/2
   - Open with the change or answer you want, stated so two engineers would build the same thing.
-- 🟠 The prompt did not say where — where 0.30
+- 🟠 The prompt did not say where — where 0.10
   - Name the file, function, or feature. Every step of orientation Claude spends finding it is a step you could have skipped.
-- 🟠 No example, error text, or reproduction in the prompt — example 0.10; 13 orientation steps, 3 tool errors
+- 🟠 No example, error text, or reproduction in the prompt — example 0.04; 13 orientation steps, 3 tool errors
   - Paste the failing command and its output, or a sample input and the output you expect.
-- 🟠 Claude had to stop and ask — Q: Two parsers match ... which parser do you mean, billing/parser.py or ingest/statement_parser.py?  A: billing/parser.py, the invoice one
+- 🟠 Claude had to stop and ask — Q: Two parsers match. The failing test is about invoice amounts; which parser do you mean, billing/parser.py or ingest/statement_parser.py?  A: billing/parser.py, the invoice one
   - That answer belongs in the opening prompt next time; or, if it is a standing fact about this repo, in CLAUDE.md.
+- 🟡 No boundaries were set — constraints 0.16
+  - Say what must keep working and what not to touch; it is the cheapest way to prevent scope drift.
 
 ## Repo context
 
-- 🔴 A correction carried repo knowledge that is not written down — follow-up 2: “no, don't loosen the test. the golden fixtures are stale, you regenerate them with the invoice-fixtures skill, that's how we always do it here” (p correction 0.90; cause repo_knowledge 0.75)
+- 🔴 A correction carried repo knowledge that is not written down — follow-up 2: “no, don't loosen the test. the golden fixtures are stale, you regenerate them with the invoice-fixtures skill, that's how we always do it here” (p correction 1.00; cause repo_knowledge 0.98)
   - Add this to CLAUDE.md (or the relevant skill) so no session has to be told again.
 - 🟠 The same file was read again and again — src/acme/billing/parser.py ×5
   - If this file is central, a two-line description of it in CLAUDE.md saves a re-read per session.
 - 🟡 Skills used — invoice-fixtures ×1
+  - Good; the retro can't judge their quality, only that they ran.
 
 ## The agent
 
-- 🔴 Claude got lost — directedness 0.6/2 (confidence 0.70); 13 explore steps before the first edit, longest run 7
+- 🔴 Claude got lost — directedness 0.8/2 (confidence 0.71); 13 explore steps before the first edit, longest run 7
   - Give it the entry point: name the file and the function, or add a map of the codebase to CLAUDE.md.
-- 🟠 Identical tool calls were repeated — 7 repeats: src/acme/billing/parser.py ×4; uv run pytest -q ×4; ...
+- 🟠 Identical tool calls were repeated — 7 repeats: src/acme/billing/parser.py ×4; uv run pytest -q ×4; src/acme/ingest/statement_parser.py ×2
+  - Re-runs after an edit are normal; identical reads and searches with nothing in between are context churn.
 - 🟠 Edits failed — 1 failed edit(s): src/acme/billing/parser.py
   - Usually a stale view of the file (edited by a command, or read too early). Not the prompt's fault.
-- 🟠 The final message reports something unresolved — unresolved 0.80
+- 🟠 The final message reports something unresolved — unresolved 0.86
   - Start the next session from that sentence.
-
-## Next time, paste this            (only with --llm / RETRO_LLM)
-
-**CLAUDE.md → Testing** (because: correction carried repo knowledge)
-    Run tests with `uv run pytest -q`. When parser tests fail with a fixture mismatch,
-    regenerate fixtures with /invoice-fixtures; never loosen assertions.
+- 🟡 Delivered, but not verified in the final message — delivered 2.1/3
+  - Ask for the verification in the prompt: 'run the tests and show the output'.
 
 ## Facts
-| tool steps                    | 26 (explore 14, run 7, edit 4, skill 1) |
+
+| | |
+|---|---|
+| tool steps | 26 (explore 14, run 7, edit 4, skill 1) |
 | orientation before first edit | 13 explore steps (longest run 7) |
-| repeated identical calls      | 7 |
-| tool errors                   | 3 {'Bash': 2, 'Edit': 1} |
-| prompt rubric                 | goal 0.3/2 · done 0.70 · where 0.30 · constraints 0.05 · example 0.10 · concise 1.8/2 · context 0.20 |
-| trace                         | directed 0.6/2 · redundant 0.85 · drift 0.10 |
-| outcome                       | delivered 2.7/3 · unresolved 0.80 · asks 0.05 |
-| follow-ups                    | 1:answer, 2:correction/repo_knowledge |
-| cost of this retro            | Jev: 6 request(s) · 7,753 input tokens · $0.0003 |
+| repeated identical calls | 7 |
+| tool errors | 3 {'Bash': 2, 'Edit': 1} |
+| files read / edited | 4 / 2 |
+| skills used / available | 1 / 3 |
+| subagents | 0 |
+| tokens fed / generated | 22,200 / 4,500 |
+| prompt rubric | goal 0.9/2 · done 0.61 · where 0.10 · constraints 0.16 · example 0.04 · concise 1.9/2 · context 0.63 |
+| trace | directed 0.8/2 · redundant 0.74 · drift 0.36 |
+| outcome | delivered 2.1/3 · unresolved 0.86 · asks 0.03 |
+| follow-ups | 1:answer, 2:correction/repo_knowledge |
+| cost of this retro | Jev: 6 request(s) · 4,681 input tokens · $0.0002 · 1580 ms |
 ```
 
-Reading it: the three angles disagree on purpose. The outcome is fine (7.7: everything
-asked for got done and verified), but it took a clarifying question, a correction, and
-13 steps of orientation to get there, and the retro says why: the prompt named neither
-the file nor the failing test (*you*), and the fixture-regeneration rule lives only in
-someone's head (*the repo*). The one thing that is the agent's own is the failed edit.
+Reading it: the three angles disagree on purpose. The outcome is the best of the three
+(6.2: the work got done), but it took a clarifying question, a correction, and 13 steps
+of orientation to get there, and the retro says why. The prompt named neither the file
+nor the failing test (*you*), and the fixture-regeneration rule lives only in someone's
+head (*the repo*). The failed edit is the only thing that is the agent's own.
+
+Two numbers worth looking at together: `delivered 2.1/3` and `unresolved 0.86`. The
+final message does say all 42 tests pass, which is verification, but it also says the
+integration suite was not run. Jev put delivery just above "all of it, as stated" rather
+than at "and it says how it was verified", and separately flagged the open item. That
+pair is the difference between *finished* and *finished and checked*.
 
 And what code alone sees, on the transcript of the session that built this tool
 (`--facts-only`, no Jev):
@@ -235,6 +245,29 @@ options considered, including ones not built.
    directory of exported transcripts plus `--trends` gives a team view of which repo
    facts are being re-taught to Claude by different people.
 
+## Things Jev taught us while building it
+
+- **Naming a thing is not identifying it.** The `where` question first asked whether the
+  prompt "names a file, function, class, module, component, endpoint, command, error
+  message, or feature". `fix the bug in the parser, tests are failing` scored **0.60**:
+  it does name a parser. But the whole point of that session is that "the parser" matched
+  two files. Putting the failure mode in `criteria.false` — *the only clue is a generic
+  noun such as 'the parser', 'the script', 'the tests', with no name, path, or describing
+  detail beside it* — took it to **0.10**, while a question that names no file but
+  describes a feature and a symptom (`why does the login page sometimes show a blank
+  screen after OAuth redirect?`) went **0.70 → 0.85**. Tightening `true` alone had dropped
+  that one to 0.52. The boundary belongs in `false`, stated as the mistake you are trying
+  to catch.
+- **Ask about the transcript, not about the code.** An early version of the trace question
+  asked whether the assistant "understood the codebase". Nothing in a list of tool calls
+  answers that. `directed` — does each step follow from the last toward what the prompt
+  asked — is answerable from exactly what Jev is given, which is why it is the question
+  that survived.
+- **One question, one owner.** `cause` has to be a separate Choice from `kind`. Folded
+  together ("is this a correction about repo conventions?") the answer collapses the two
+  facts the report needs to keep apart: *that* the developer pushed back, and *why* the
+  assistant did not already know.
+
 ## Limits
 
 - **Bash-first sessions hide reads.** When Claude reads with `cat` instead of `Read`,
@@ -249,6 +282,12 @@ options considered, including ones not built.
 - **The cause question is opinionated.** `repo_knowledge` versus `prompt_missing_info`
   is a judgment about where a fact *should* live. Expect to reword its criteria for your
   team after a week of ledger rows.
+- **Prompts leave the machine.** Jev sees your prompts, Claude's final message, a trace
+  of tool names and file paths, and your skill descriptions. It never sees file contents,
+  command output, or diffs, but prompt text is still your text going to a third party. On
+  this repo's own transcripts the sandbox's exfiltration classifier blocked that call, and
+  it was right to ask. Decide that deliberately before installing the hook; `--facts-only`
+  does the counting with no network at all.
 - **`SessionEnd` has a budget.** Claude Code gives it 1.5 s by default and raises it to
   the hook's `timeout`, capped at 60 s. Five Jev requests fit easily; a Sonnet call
   usually does; both plus a slow network might not, which is why the report is written

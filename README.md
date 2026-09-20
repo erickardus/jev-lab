@@ -170,15 +170,17 @@ one Sonnet call drafts the `CLAUDE.md` paragraph or the prompt rewrite. `--trend
 aggregates the ledger across sessions.
 
 ```
-**Prompt 3.2/10 · Agent 4.1/10 · Outcome 7.7/10**
+**Prompt 4.2/10 · Agent 4.3/10 · Outcome 6.2/10**
 ## Your prompt
-- 🟠 The prompt did not say where — where 0.30
+- 🟠 The prompt did not say where — where 0.10
 ## Repo context
 - 🔴 A correction carried repo knowledge that is not written down — “...you regenerate
-  them with the invoice-fixtures skill, that's how we always do it here” (cause repo_knowledge 0.75)
+  them with the invoice-fixtures skill, that's how we always do it here” (cause repo_knowledge 0.98)
 ## The agent
-- 🔴 Claude got lost — directedness 0.6/2; 13 explore steps before the first edit
+- 🔴 Claude got lost — directedness 0.8/2; 13 explore steps before the first edit
 ```
+
+One report costs 6 Jev requests, ~4.7k input tokens, $0.0002, and 1.6 s.
 
 Claude Code skill: `/retro`.
 

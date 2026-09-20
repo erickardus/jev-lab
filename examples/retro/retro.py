@@ -419,11 +419,14 @@ def prompt_questions() -> dict:
                 "false": "Nothing in it says what the finished result should look like or do",
             },
         ),
+        # "the parser" names a thing without identifying it. The first wording accepted
+        # that at 0.60; naming the failure mode in `false` drops it to 0.11 while a
+        # question that describes a feature and a symptom stays at 0.85.
         "where": Noul(
             instructions="`prompt` identifies where in the codebase or which thing it is about",
             criteria={
-                "true": "It names a file, function, class, module, component, endpoint, command, error message, or feature, or the request is general and needs no location",
-                "false": "It refers to code or a problem without saying which one, and the request is not general",
+                "true": "It names a specific file, path, function, class, endpoint, or command; or it describes the thing concretely enough that a developer on the project would know where to look, by naming a feature, a screen, a symptom, or a specific situation; or the request is general and needs no location",
+                "false": "The only clue to what code is meant is a generic noun such as 'the parser', 'the script', 'the function', 'the tests' or 'the bug', with no name, path, or describing detail beside it; or no location is given at all",
             },
         ),
         "constraints": Noul(
