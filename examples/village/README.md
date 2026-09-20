@@ -16,6 +16,18 @@ probability; the panel shows the whole distribution.
 Night: Sela is asleep with her windows lit, the tavern crowd's thoughts stack without
 overlapping, and Old Tom is 70% "staying put" because of course he is.
 
+![talking to Sela](screenshot-chat.jpg)
+
+Talking to Sela. The traveler asked for work; Sela, being nosy, wants to know more first.
+Jev read the reply and recorded *declined* (p=0.23) — no commitment yet.
+
+![the chronicle](screenshot-chronicle.jpg)
+
+The chronicle tab, day 1 around noon: a rumor about Pip that Sela heard from Nell, Pip
+hearing it about himself, the confrontation Haiku wrote for it, and Jev judging the
+exchange tense — which is now a grudge in Pip's relationships and a memory that
+tonight's reflection will read.
+
 ![why Bram is in the field](screenshot-why.jpg)
 
 Click a villager and the panel shows what Jev was actually asked: every available action
@@ -40,6 +52,8 @@ In the page:
 - **Click a villager** (on the map or in the panel) to see *why*: every option Jev was
   offered, in the exact words it was given, with its probability; their memory; what news
   they've heard; who they get along with.
+- **Talk to them.** With a villager selected, type in the chat box: the traveler walks
+  over, the villager replies in character, and Jev decides what your words did (below).
 - pause · 1×/2×/4× · a live **jev ↔ random** brain switch, the fastest way to see what
   Jev adds.
 
@@ -77,7 +91,64 @@ Nobody scripted "everyone goes to the tavern at noon", "the nosy innkeeper gossi
 needs described in words plus one Choice question per villager. Cost for that run: 23
 requests, 47k input tokens, $0.002 — roughly 7¢ per real hour at 1× speed.
 
-## What happens in the village
+## Talking to villagers
+
+Select a villager and type. The traveler walks over (the villager waits), Haiku writes the
+reply from the villager's full state — traits, mood, memories, what they've heard, how they
+feel about you, your earlier exchanges — and then **Jev reads both your message and the
+reply** and decides what happened:
+
+| Jev question | what it changes |
+|---|---|
+| how did the villager take it (Score: badly / neutral / well) | their affinity toward you, their mood |
+| was the traveler rude or threatening (Noul) | affinity down, "the traveler was rude to me" in long-term memory |
+| did you assert a claim, and does *this* villager believe it (Nouls) | believed → it enters their knowledge as news (with a subject if it names someone) and can spread; doubted → "the traveler claimed…; I'm not sure I believe it" |
+| did you ask them to do something, and did they agree (Nouls) | agreed → a commitment to you with a deadline, kept or broken like any other |
+
+The LLM proposes the structured reading (claim, request, agreed) in the same call that
+writes the reply; Jev verifies it against the actual text and judges belief given who the
+villager is. So the same rumor lands differently: gossipy Sela may run with it, wary Bram
+won't. That is the influence model — your words have consequences, but through each
+character's own judgment, and everything you say is in their journal.
+
+The chat ends when you walk away, press *end*, or say nothing for 30 sim-seconds; the
+villager remembers the conversation and goes back to their day.
+
+## What happens in the village (v3: memory, consequence, change)
+
+- **Villagers know only what they've seen.** Each one sees within 7 tiles or the place
+  they're in, and remembers where they last saw everyone. Jev gets *their* view: "Bram —
+  last seen at the field around 09:40". They go looking where they believe someone is and
+  sometimes find nobody: "went looking for Old Tom on the road but he wasn't there" — which
+  Pip later brings up in conversation.
+- **Conversations have consequences.** The narrator writes the lines and may propose a
+  promise or a piece of gossip; nothing is applied until **Jev reads the lines** and
+  confirms it (was the promise really made? is the rumor about that person's conduct? how
+  did the exchange go?). Confirmed promises become **commitments** with a deadline that
+  the promiser sees as a `keep_promise` option; kept promises raise affinity, broken ones
+  lower it and become news ("Nell doesn't keep her word"). A tense exchange lowers
+  affinity and both remember it. Rumors carry a subject; when the subject hears one about
+  themselves, they take it badly and hold it against the messenger.
+- **Incidents need someone to step up.** A fire at the bakery (three water carriers
+  needed), Pip missing, Old Tom ill, a thief at the market. Whoever knows gets a job
+  action; a speculative Noul shows who *would* drop everything. Helpers are remembered
+  gratefully; those who knew and didn't come are not.
+- **Memory has layers.** `recently` (short, what Jev sees every decision), a **journal**
+  (everything, forever, with day and time), and **long-term memory** for significant
+  events — being helped in a fire, a broken promise, a rumor about you — which Jev sees as
+  `remembers_well` on every decision for the rest of the run.
+- **Characters change.** When a villager goes to sleep, Jev reads their day and their
+  long-term memories and picks the strongest change: more wary / trusting / sociable /
+  withdrawn / bitter / generous / anxious / easygoing, or unchanged. Code applies it to
+  their traits (evolved traits show in gold), which every future decision sees. After a
+  day with a fire, a broken promise, and gossip: Bram became *wary of others* (p=0.98),
+  Nell too; Mira, who was helped, became *trusting*; Sela *generous*; Pip and Old Tom had
+  ordinary days.
+- **The chronicle** is the full linear history with day markers, in its own tab; each
+  villager's card shows their commitments, long-term memories, how they've changed, whom
+  they last saw where, and their journal.
+
+## What happens in the village (v2)
 
 - **Needs** (hunger, energy, social) rise over time and are described to Jev in words;
   actions bring them down. Around noon everyone drifts to the tavern; at night they go home
@@ -108,8 +179,12 @@ sim/brain.py     Brain protocol. JevBrain: one request per tick with one Choice 
                  villager (+ a mood Score and a speculative "what would they talk about").
                  RandomBrain: the fallback and the control group.
 sim/narrator.py  Narrator protocol. TemplateNarrator: canned lines. ClaudeNarrator: the LLM seam.
-sim/engine.py    the loop: movement, needs, arrivals, conversations, batching idle villagers
-                 into a brain request without ever blocking the world on it
+sim/incidents.py things that go wrong and need a helper: spawn, job actions, resolve/fail effects
+sim/outcomes.py  the LLM proposes a promise/rumor (or, for the player, a claim/request), Jev
+                 verifies against the lines and judges belief/agreement, code applies
+sim/reflection.py nightly: Jev judges how the day changed a villager; code drifts their traits
+sim/engine.py    the loop: movement, needs, perception, arrivals, conversations, incidents,
+                 commitments, decisions — never blocking the world on a model
 server.py        FastAPI + WebSocket; streams snapshots at 10 Hz; serves static/index.html
 static/index.html  canvas renderer: pre-rendered tile layer, procedural pixel sprites with walk
                  cycles and facing, snapshot interpolation, non-overlapping bubble layout, the side panel
@@ -168,6 +243,36 @@ how many memories a villager keeps, when the tavern and bakery are open (`world.
 far someone will chase a moving conversation partner before giving up (`engine.py`).
 Traits are plain strings; add `"afraid of the well"` to Old Tom and watch the
 `fetch_water` probability change without changing any code.
+
+## Things Jev taught us while building it (round four: talking to villagers)
+
+- **Belief is a judgment about the listener, not the claim.** The same sentence about
+  Old Tom's hidden boat is *believed* or *doubted* depending on the villager's traits and
+  opinion of the traveler; Jev gets both in state and the reply text as evidence. Sela at
+  0.42 ("that's interesting…") stayed below the line — right call.
+- **A hedge is not a yes.** "Come by tonight and we'll see how you work out" was judged
+  *declined* for a request to be hired; the request-agreement Noul's false criterion
+  ("asks for something first") is doing exactly that.
+- **LLM replies come with stage directions.** `*leans against the counter*` had to be
+  stripped and prohibited; the outcome JSON still parsed fine.
+
+## Things Jev taught us while building it (round three)
+
+- **Generation confabulates; verification is cheap.** Haiku proposed a rumor "about She"
+  and one about "unknown thief"; Jev's Noul plus a name lookup dropped both. The pattern
+  (LLM proposes structured content → Jev confirms it against the source text → code
+  applies) is the extraction-cascade cookbook, and it is what makes it safe to let the
+  narrator invent things.
+- **A promise made in conversation should be keepable in conversation.** Bram kept coming
+  back — "got that bread and cider you promised?" — and Mira kept re-promising, because
+  fulfilment only existed as a separate action. Now Jev is also asked whether a standing
+  promise between the two speakers was *carried out* in the exchange, and a repeat promise
+  renews the deadline instead of creating a duplicate.
+- **"About someone" needs a boundary.** "Her henhouse was attacked by a fox" is an event
+  that happened to Mira, not gossip about her. The rumor criterion now says conduct or
+  character, and gives both kinds as examples.
+- **Incidents need cooldowns and office hours.** Without them the bakery burned four times
+  in a day, once at 1 am while everyone slept.
 
 ## Things Jev taught us while building it (round two)
 

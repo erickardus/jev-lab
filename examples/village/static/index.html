@@ -48,10 +48,31 @@
   .stats { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; color:var(--muted); font-size:11px; }
   .stats b { color:var(--ink); font-weight:500; }
   .weather { color:#9fb8d8; }
+  .trait.new { color:var(--gold); }
+  .commit { color:#c9b06a; font-size:11px; margin-top:3px; }
+  .inc { border-left:2px solid #c25a5a; padding:4px 8px; margin:4px 0; font-size:11px; color:var(--muted); }
+  .inc.done { border-left-color:#5aa64a; } .inc.failed { border-left-color:#666; }
+  .inc b { color:var(--ink); font-weight:500; }
+  .helpers { display:flex; gap:6px; flex-wrap:wrap; margin-top:3px; }
+  .helpers span { background:#2a2e39; border-radius:3px; padding:1px 5px; }
+  .tabs { display:flex; gap:4px; margin:10px 0 4px; }
+  .tabs button { font-size:11px; padding:2px 8px; }
+  #chron { font-size:11px; color:var(--muted); max-height:60vh; overflow:auto; border-top:1px solid var(--line); padding-top:6px; }
+  #chron .dayhdr { color:var(--ink); font-weight:600; margin:8px 0 2px; }
+  #chron .change { color:var(--gold); } #chron .reflection { color:#7f8594; }
+  .lt { color:#c9b06a; }
+  #chat { border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin:8px 0 4px; background:#171a21; }
+  #chat .who { color:var(--muted); font-size:11px; margin-bottom:4px; display:flex; justify-content:space-between; }
+  #chat .log { max-height:150px; overflow:auto; font-size:12px; margin-bottom:6px; }
+  #chat .log div { margin:2px 0; } #chat .log .me { color:#8fd3a8; } #chat .log .them { color:var(--ink); }
+  #chat form { display:flex; gap:6px; }
+  #chat input { flex:1; background:#0f1116; color:var(--ink); border:1px solid #363b48; border-radius:4px; padding:5px 8px; font:inherit; }
+  #chat .status { color:var(--muted); font-size:11px; margin-top:4px; min-height:14px; }
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="c"></canvas><div id="hint">click the map to walk · click a villager to see why</div></div>
+<div id="stage"><canvas id="c"></canvas><div id="hint">click the map to walk · click a villager to see why</div>
+<div id="stale" hidden style="position:absolute;top:10px;left:10px;background:#c25a5a;color:#fff;padding:6px 10px;border-radius:5px;font-size:12px">the server is running an older build than this page — restart it (Ctrl-C, then <code>uv run examples/village/server.py</code>)</div></div>
 <div id="panel">
   <h1>Village</h1>
   <div class="clock"><span id="hhmm">--:--</span><small id="label"></small></div>
@@ -64,14 +85,27 @@
     <button data-brain="random" class="brain">random</button>
     <button id="wave" class="wave">👋 wave</button>
   </div>
+  <div id="chat" hidden>
+    <div class="who"><span id="chat-who"></span><button id="chat-end" style="font-size:11px;padding:1px 6px">end</button></div>
+    <div class="log" id="chat-log"></div>
+    <form id="chat-form"><input id="chat-input" autocomplete="off" placeholder="say something to them…" maxlength="300"><button type="submit">send</button></form>
+    <div class="status" id="chat-status"></div>
+  </div>
+  <div class="tabs"><button id="tab-live" class="on">live</button><button id="tab-chron">chronicle</button></div>
+  <div id="live">
   <div id="npcs"></div>
+  <h2>incidents</h2>
+  <div id="incidents"></div>
   <h2>news · who knows</h2>
   <div class="news" id="news"></div>
   <div class="events" id="events"></div>
+  </div>
+  <div id="chron" hidden></div>
   <div class="stats" id="stats"></div>
 </div>
 <script>
 const TILE = 28;
+const EXPECT_BUILD = 4;
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
@@ -84,12 +118,41 @@ const rain = Array.from({length: 160}, () => ({x: Math.random(), y: Math.random(
 const ws = new WebSocket(`ws://${location.host}/ws`);
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
-  if (msg.type === 'map') { map = msg; canvas.width = map.w * TILE; canvas.height = map.h * TILE; mapLayer = renderMapLayer(); }
+  if (msg.type === 'map') { map = msg; canvas.width = map.w * TILE; canvas.height = map.h * TILE; mapLayer = renderMapLayer(); document.getElementById('stale').hidden = (msg.build || 0) >= EXPECT_BUILD; }
   else if (msg.type === 'state') { prevState = state; prevAt = stateAt; state = msg; stateAt = performance.now(); renderPanel(); }
 };
 const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
 document.getElementById('pause').onclick = () => send({cmd:'pause'});
 document.getElementById('wave').onclick = () => send({cmd:'wave'});
+let tab = 'live';
+document.getElementById('chat-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const inp = document.getElementById('chat-input'); const text = inp.value.trim();
+  if (!text || !selected) return;
+  send({cmd:'say', to: selected, text}); inp.value = '';
+  chatLocal.push(['Traveler', text]); renderChat();
+});
+document.getElementById('chat-end').onclick = () => { send({cmd:'end_chat'}); selected = null; renderPanel(); };
+let chatLocal = [];  // messages typed but not yet echoed by the server
+function renderChat() {
+  const box = document.getElementById('chat');
+  const n = state && state.npcs.find(x => x.id === selected && !x.controlled);
+  box.hidden = !n;
+  if (!n) return;
+  const c = state.chat || {};
+  const active = c.with === n.id;
+  document.getElementById('chat-who').textContent = `talk to ${n.name}` + (active ? '' : ' — type to walk over and speak');
+  const log = active ? c.log : [];
+  const pending = chatLocal.filter(([, t]) => !log.some(([w, tt]) => w === 'Traveler' && tt === t));
+  const rows = log.concat(pending);
+  const el = document.getElementById('chat-log');
+  el.innerHTML = rows.map(([w, t]) => `<div class="${w === 'Traveler' ? 'me' : 'them'}"><b>${esc(w)}:</b> ${esc(t)}</div>`).join('') || '<div style="color:#8b8f9c">nothing said yet</div>';
+  el.scrollTop = el.scrollHeight;
+  document.getElementById('chat-status').textContent = active ? ({walking: 'walking over…', thinking: `${n.name} is thinking…`, talking: ''}[c.status] ?? c.status) : '';
+  if (rows.length > 20) chatLocal = chatLocal.slice(-5);
+}
+document.getElementById('tab-live').onclick = () => { tab = 'live'; renderPanel(); };
+document.getElementById('tab-chron').onclick = () => { tab = 'chron'; renderPanel(); };
 document.querySelectorAll('.speed').forEach(b => b.onclick = () => { send({cmd:'speed', value:+b.dataset.speed}); document.querySelectorAll('.speed').forEach(x=>x.classList.toggle('on', x===b)); });
 document.querySelectorAll('.brain').forEach(b => b.onclick = () => send({cmd:'brain', value:b.dataset.brain}));
 
@@ -394,6 +457,7 @@ frame();
 
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
+let names = {};
 function npcCard(n) {
   const sel = selected === n.id;
   const probs = Object.entries(n.all_probs).sort((a,b) => b[1]-a[1]);
@@ -401,17 +465,22 @@ function npcCard(n) {
   const top = probs[0] ? probs[0][0] : null;
   return `
     <div class="npc ${sel ? 'sel' : ''}" data-id="${n.id}">
-      <div class="head"><span class="dot" style="background:${n.color}"></span><span class="name">${n.name}</span><span class="role">${esc(n.role)} · ${n.traits.join(', ')}</span></div>
+      <div class="head"><span class="dot" style="background:${n.color}"></span><span class="name">${n.name}</span><span class="role">${esc(n.role)} · ${n.traits.map(t => `<span class="trait ${n.original_traits && !n.original_traits.includes(t) ? 'new' : ''}">${esc(t)}</span>`).join(', ')}</span></div>
       <div class="doing">${esc(n.action_label)}${n.deciding ? ' <span style="color:#8b8f9c">· thinking…</span>' : ''}</div>
       ${n.controlled ? `<div class="mem">${n.memory.slice(-3).map(m => '· ' + esc(m)).join('<br>')}</div>` : `
-      <div class="needs">${Object.entries(n.needs_words).map(([k,v]) => `<span>${k} <b>${v}</b></span>`).join('')} <span>mood <b>${n.mood.toFixed(1)}</b></span>${n.knows.length ? `<span>knows <b>${n.knows.length}</b> news</span>` : ''}</div>
+      <div class="needs">${Object.entries(n.needs_words).map(([k,v]) => `<span>${k} <b>${v}</b></span>`).join('')} <span>mood <b>${n.mood.toFixed(1)}</b></span>${n.knows.length ? `<span>knows <b>${n.knows.length}</b> news</span>` : ''}${n.help_p > 0 ? `<span>would help <b>${n.help_p.toFixed(2)}</b></span>` : ''}</div>
+      ${n.commitments.length ? `<div class="commit">${n.commitments.map(c => `promised ${names[c.to] || c.to}: ${esc(c.what)}`).join('<br>')}</div>` : ''}
       <div class="probs">${shown.map(([k,p]) => sel
         ? `<div class="opt ${k===top?'top':''}"><b>${k}</b> · ${p.toFixed(2)}<br>${esc(n.options[k] || '')}</div>`
         : `<div class="bar ${k===top?'top':''}"><span class="lab">${k}</span><span class="track"><span class="fill" style="width:${Math.round(p*100)}%"></span></span><span class="val">${p.toFixed(2)}</span></div>`).join('')}
         ${probs.length ? `<div class="bar"><span class="lab">confidence</span><span class="track"><span class="fill" style="width:${Math.round(n.confidence*100)}%;background:#8b8f9c"></span></span><span class="val">${n.confidence.toFixed(2)}</span></div>` : ''}
       </div>
       ${sel ? `
-        <div class="small">remembers:<br>${n.memory.map(m => '· ' + esc(m)).join('<br>') || '—'}</div>
+        ${n.long_term.length ? `<div class="small lt">remembers well:<br>${n.long_term.map(m => '· ' + esc(m)).join('<br>')}</div>` : ''}
+        ${n.trait_log.length ? `<div class="small">has changed:<br>${n.trait_log.map(t => `· day ${t.day}: ${esc(t.change.replace('more_', 'more '))} (p=${t.p})`).join('<br>')}</div>` : ''}
+        <div class="small">recently:<br>${n.memory.map(m => '· ' + esc(m)).join('<br>') || '—'}</div>
+        <div class="small">last seen: ${Object.entries(n.last_seen).map(([k, v]) => `${names[k] || k} — ${esc(v)}`).join(' · ') || '—'}</div>
+        <div class="small">journal (${n.journal.length} entries today and before):<br>${n.journal.slice(-12).map(j => `· d${j.day} ${j.hhmm} ${esc(j.text)}`).join('<br>')}</div>
         ${n.knows.length ? `<div class="small">has heard:<br>${n.knows.map(m => '· ' + esc(m)).join('<br>')}</div>` : ''}
         ${Object.keys(n.affinity).length ? `<div class="small">gets along with: ${Object.entries(n.affinity).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `${k} ${v.toFixed(1)}`).join(', ')}</div>` : ''}
         <div class="small">what Jev saw about ${n.name}:</div>
@@ -423,24 +492,45 @@ function npcCard(n) {
 function sawOf(n) {
   // reconstruct the villager slice of the state (mirrors NPC.describe on the server)
   const d = { role: n.role, traits: n.traits, feels: n.needs_words, doing: n.action_label, recently: n.memory };
-  if (n.knows.length) d.has_heard = n.knows.slice(-3);
+  if (n.knows.length) d.has_heard = n.knows.slice(-4);
+  if (n.commitments.length) d.promised = n.commitments.map(c => c.what);
+  if (n.long_term.length) d.remembers_well = n.long_term.slice(-6);
   const friends = Object.entries(n.affinity).filter(([,v]) => v >= 0.4).map(([k]) => k);
   if (friends.length) d.gets_along_with = friends;
   return d;
 }
 
 function renderPanel() {
-  document.getElementById('hhmm').textContent = state.clock.hhmm;
+  names = Object.fromEntries(state.npcs.map(n => [n.id, n.name]));
+  renderChat();
+  document.getElementById('hhmm').textContent = `day ${state.day} · ${state.clock.hhmm}`;
+  document.getElementById('tab-live').classList.toggle('on', tab === 'live');
+  document.getElementById('tab-chron').classList.toggle('on', tab === 'chron');
+  document.getElementById('live').hidden = tab !== 'live';
+  const ch = document.getElementById('chron'); ch.hidden = tab !== 'chron';
+  if (tab === 'chron') {
+    const keep = ch.scrollTop, atBottom = ch.scrollHeight - ch.scrollTop - ch.clientHeight < 30;
+    let out = '', day = null;
+    for (const e of state.chronicle) {
+      if (e.kind === 'day' || e.day !== day) { day = e.day; out += `<div class="dayhdr">Day ${day}</div>`; if (e.kind === 'day') continue; }
+      out += `<div class="${e.kind}">${e.hhmm} ${esc(e.text)}</div>`;
+    }
+    ch.innerHTML = out; ch.scrollTop = atBottom ? ch.scrollHeight : keep;
+    return;
+  }
   document.getElementById('label').innerHTML = esc(state.clock.label) + (state.weather === 'raining' ? ' <span class="weather">· raining</span>' : '') + (state.paused ? ' · paused' : '');
   document.getElementById('pause').textContent = state.paused ? 'resume' : 'pause';
   document.querySelectorAll('.brain').forEach(b => b.classList.toggle('on', b.dataset.brain === state.brain.name));
   const el = document.getElementById('npcs');
   el.innerHTML = state.npcs.map(npcCard).join('');
-  const names = Object.fromEntries(state.npcs.map(n => [n.id, n.name]));
+  document.getElementById('incidents').innerHTML = state.incidents.length ? state.incidents.slice().reverse().map(i => `
+    <div class="inc ${i.resolved ? 'done' : i.failed ? 'failed' : ''}"><b>${esc(i.text)}</b> — ${i.resolved ? 'resolved' : i.failed ? 'failed' : `${i.progress}/${i.needed} · ${i.left}s left`}<br>${esc(i.job)}
+      <div class="helpers">${i.helpers.map(h => `<span>${names[h] || h}</span>`).join('')}${!i.resolved && !i.failed ? state.npcs.filter(n => !n.controlled && n.knows.includes(i.text) && n.help_p > 0).map(n => `<span style="opacity:.7">${n.name} would help ${n.help_p.toFixed(2)}</span>`).join('') : ''}</div>
+    </div>`).join('') : '<div class="small">nothing has gone wrong yet</div>';
   document.getElementById('news').innerHTML = state.news.length
-    ? state.news.slice().reverse().map(item => `<div><b>${esc(item.text)}</b> <span>(${item.since})</span><br>known by: ${item.knows.map(id => names[id] || id).join(', ') || 'nobody yet'}</div>`).join('')
+    ? state.news.slice().reverse().map(item => `<div><b>${esc(item.text)}</b> <span>(${item.since}${item.subject ? ` · about ${names[item.subject] || item.subject}` : ''})</span><br>known by: ${item.knows.map(id => names[id] || id).join(', ') || 'nobody yet'}</div>`).join('')
     : '<div>nothing has happened yet</div>';
-  document.getElementById('events').innerHTML = state.events.slice().reverse().map(e => `<div class="${e.includes(': "') ? 'say' : ''}">${esc(e)}</div>`).join('');
+  document.getElementById('events').innerHTML = state.events.slice().reverse().map(e => `<div class="${e.includes(': "') ? 'say' : ''}" style="${e.includes('has become') ? 'color:#e4b04a' : ''}">${esc(e)}</div>`).join('');
   const b = state.brain, nr = state.narrator;
   document.getElementById('stats').innerHTML =
     `brain <b>${b.name}</b> · <b>${b.requests}</b> requests · <b>${b.input_tokens.toLocaleString()}</b> tokens · <b>$${b.cost_usd.toFixed(4)}</b>${b.errors ? ` · ${b.errors} errors` : ''}<br>` +

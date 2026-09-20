@@ -39,6 +39,7 @@ class Decision:
     mood: float = 1.0
     topic: str | None = None
     share_news: float = 0.0
+    help: float = 0.0
 
 
 @dataclass
@@ -56,7 +57,7 @@ class Brain(Protocol):
     name: str
     usage: Usage
 
-    async def decide(self, world: World, npcs: list[NPC], options: dict[str, list[Action]]) -> dict[str, Decision]: ...
+    async def decide(self, world: World, npcs: list[NPC], options: dict[str, list[Action]], incidents_known: dict | None = None) -> dict[str, Decision]: ...
 
 
 class RandomBrain:
@@ -66,7 +67,7 @@ class RandomBrain:
         self.rng = random.Random(seed)
         self.usage = Usage()
 
-    async def decide(self, world, npcs, options):
+    async def decide(self, world, npcs, options, incidents_known=None):
         out = {}
         for n in npcs:
             acts = options[n.id]
@@ -82,68 +83,75 @@ class JevBrain:
         self.client = AsyncTypeSafeClient(model=model)
         self.usage = Usage()
 
-    def _state(self, world: World, deciding: list[NPC]) -> dict:
+    def _state(self, world: World, n: NPC) -> dict:
+        """The village as *this* villager knows it: themselves in full, others as seen or remembered."""
         st = {
             "time": f"{world.clock.hhmm()}, {world.clock.label()}",
             "weather": world.weather,
-            "villagers": {n.id: n.describe(world) for n in world.npcs if not n.controlled},
-            "places": {p.name: p.describe(world) for p in world.places.values() if p.kind != "home"},
+            "me": n.describe(world),
+            "others": {o.name: n.describe_other(o, world) for o in world.npcs if o is not n and not o.controlled},
+            "places": {p.name: p.describe(world, viewer=n) for p in world.places.values() if p.kind != "home"},
         }
-        trav = next((n for n in world.npcs if n.controlled), None)
-        if trav:
-            st["traveler"] = trav.describe(world)
+        trav = next((o for o in world.npcs if o.controlled), None)
+        if trav and trav.id in n.sees:
+            st["traveler"] = {"description": "a stranger passing through, new to the village", "at": trav.where_word(world), "doing": trav.action_label}
         return st
 
-    def _questions(self, world: World, deciding: list[NPC], options: dict[str, list[Action]]) -> dict:
-        qs: dict = {}
-        for n in deciding:
-            acts = options[n.id]
-            qs[f"act|{n.id}"] = Choice(
+    def _questions(self, world: World, n: NPC, acts: list[Action], incidents_known: list[str]) -> dict:
+        qs: dict = {
+            "act": Choice(
                 instructions=(
-                    f"It is {world.clock.label()}. Given how `villagers.{n.id}` feels, their traits, what they "
-                    f"remember, and where everyone is, what does {n.name} do next?"
+                    f"It is {world.clock.label()}. `me` is {n.name}, a {n.role}. Given how they feel, their traits, "
+                    f"what they remember and have promised, and what they know about where others are, what do they do next?"
                 ),
                 criteria={a.id: a.describe(n, world) for a in acts},
-            )
-            qs[f"mood|{n.id}"] = Score(
-                instructions=f"What mood is `villagers.{n.id}` in right now, judging by how they feel and what happened recently?",
+            ),
+            "mood": Score(
+                instructions=f"What mood is `me` ({n.name}) in right now, judging by how they feel and what happened recently?",
                 criteria=[
                     "Gloomy or irritable: tired, hungry, lonely, or something recently went badly",
                     "Neutral: getting on with the day",
                     "Cheerful: rested, fed, in good company, or something recently went well",
                 ],
+            ),
+        }
+        if n.knows:
+            qs["share"] = Noul(
+                instructions=f"If `me` ({n.name}) chats with someone now, they would pass on the news they have heard (`me.has_heard`)",
+                criteria={"true": "Their traits and mood make them likely to bring up what they heard", "false": "They keep it to themselves, or are too tired or preoccupied to bother"},
             )
-            if n.knows:
-                # Speculative: read only if they end up in a conversation while knowing news.
-                qs[f"share|{n.id}"] = Noul(
-                    instructions=f"If `villagers.{n.id}` chats with someone now, they would pass on the news they have heard (`villagers.{n.id}.has_heard`)",
-                    criteria={
-                        "true": "Their traits and mood make them likely to bring up what they heard",
-                        "false": "They are the kind to keep it to themselves, or are too tired or preoccupied to bother",
-                    },
-                )
-            if any(a.id.startswith("talk_to_") for a in acts):
-                # Speculative: only used if they end up in a conversation. Same request, no extra latency.
-                qs[f"topic|{n.id}"] = Choice(
-                    instructions=f"If `villagers.{n.id}` talks to someone in the next while, what would they most likely bring up?",
-                    criteria=dict(TOPICS),
-                )
+        if incidents_known:
+            qs["help"] = Noul(
+                instructions=f"`me` ({n.name}) would drop what they are doing right now to help with this: {incidents_known[-1]}",
+                criteria={"true": "Their traits, mood, and relationships make them the kind to step up, and they are able to", "false": "They would leave it to others, are too tired or self-absorbed, or don't care for the people involved"},
+            )
+        if any(a.id.startswith("talk_to_") for a in acts):
+            qs["topic"] = Choice(
+                instructions=f"If `me` ({n.name}) talks to someone in the next while, what would they most likely bring up?",
+                criteria=dict(TOPICS),
+            )
         return qs
 
-    async def decide(self, world, npcs, options):
-        t0 = time.perf_counter()
-        resp = await self.client.system_one(state=self._state(world, npcs), questions=self._questions(world, npcs, options), timeout=10.0)
+    async def _decide_one(self, world: World, n: NPC, acts: list[Action], incidents_known: list[str]) -> Decision:
+        resp = await self.client.system_one(state=self._state(world, n), questions=self._questions(world, n, acts, incidents_known), timeout=10.0)
         self.usage.requests += 1
         self.usage.input_tokens += resp.usage.input_tokens
+        act = resp.choices["act"]
+        d = Decision(act.choice, dict(act.probabilities), act.confidence, resp.scores["mood"].score)
+        d.topic = resp.choices["topic"].choice if "topic" in resp.choices else None
+        d.share_news = resp.nouls["share"].noul if "share" in resp.nouls else 0.0
+        d.help = resp.nouls["help"].noul if "help" in resp.nouls else 0.0
+        return d
+
+    async def decide(self, world, npcs, options, incidents_known=None):
+        """One request per villager (their views differ), all in flight at once."""
+        import asyncio
+
+        t0 = time.perf_counter()
+        incidents_known = incidents_known or {}
+        results = await asyncio.gather(*(self._decide_one(world, n, options[n.id], incidents_known.get(n.id, [])) for n in npcs))
         self.usage.seconds += time.perf_counter() - t0
-        out: dict[str, Decision] = {}
-        for n in npcs:
-            act = resp.choices[f"act|{n.id}"]
-            mood = resp.scores[f"mood|{n.id}"].score
-            topic = resp.choices[f"topic|{n.id}"].choice if f"topic|{n.id}" in resp.choices else None
-            share = resp.nouls[f"share|{n.id}"].noul if f"share|{n.id}" in resp.nouls else 0.0
-            out[n.id] = Decision(act.choice, dict(act.probabilities), act.confidence, mood, topic, share)
-        return out
+        return {n.id: d for n, d in zip(npcs, results)}
 
     async def close(self) -> None:
         await self.client.__aexit__(None, None, None)

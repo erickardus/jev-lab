@@ -59,6 +59,8 @@ def build_actions() -> list[Action]:
         hours = 6 if world.clock.hour >= 20 or world.clock.hour < 5 else 1.5
         npc.busy_until = sim.t + hours * world.clock.seconds_per_game_hour
         npc.action_label = "sleeping" if hours > 2 else "resting at home"
+        if hours > 2:
+            sim.maybe_reflect(npc)  # the day's history may change who they are
 
     def rest_done(npc, world, sim):
         npc.needs["energy"] = 0.05

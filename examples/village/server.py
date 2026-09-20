@@ -34,6 +34,7 @@ from sim.engine import Sim  # noqa: E402
 from sim.narrator import ClaudeNarrator, TemplateNarrator  # noqa: E402
 
 STATIC = Path(__file__).resolve().parent / "static"
+BUILD = 4  # bump when the websocket protocol changes; the page warns if the server is older
 STEP = 0.05  # sim step in seconds (20 Hz)
 BROADCAST_HZ = 10
 
@@ -59,8 +60,8 @@ async def run_headless(sim: Sim, seconds: float, factor: float = 8.0) -> None:
         await asyncio.sleep(STEP / factor)
     if sim._inflight:
         await sim._inflight
-    for line in sim.world.events:
-        print(line)
+    for e in sim.world.chronicle:
+        print(f"d{e['day']} {e['hhmm']}  {e['text']}")
     snap = sim.snapshot()
     print(json.dumps({"brain": snap["brain"], "narrator": snap["narrator"], "clock": snap["clock"]}, indent=2))
     for n in sim.npcs:
@@ -106,13 +107,19 @@ def build_app(sim: Sim):
     async def ws(websocket: WebSocket):
         await websocket.accept()
         clients.add(websocket)
-        await websocket.send_text(json.dumps({"type": "map", **sim.world.snapshot_map()}))
+        await websocket.send_text(json.dumps({"type": "map", "build": BUILD, **sim.world.snapshot_map()}))
         try:
             while True:
                 raw = await websocket.receive_text()
                 cmd = json.loads(raw)
                 if cmd.get("cmd") == "move":
+                    if sim.chat_with:
+                        sim.end_chat()
                     sim.move_player(int(cmd["x"]), int(cmd["y"]))
+                elif cmd.get("cmd") == "say":
+                    sim.player_say(str(cmd.get("to", "")), str(cmd.get("text", "")))
+                elif cmd.get("cmd") == "end_chat":
+                    sim.end_chat()
                 elif cmd.get("cmd") == "wave":
                     sim.player_wave()
                 elif cmd.get("cmd") == "pause":

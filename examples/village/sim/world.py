@@ -6,6 +6,8 @@ import heapq
 import random
 from dataclasses import dataclass, field
 
+VISION = 7  # tiles (Manhattan) a villager can see
+
 # Legend: '#' tree, '~' water, 'H' house wall, '.' grass, ':' path,
 # letters = anchor tiles for places (walkable). a-f are home doors of NPCs 0-5.
 MAP = """\
@@ -41,8 +43,12 @@ class Place:
     kind: str  # home | tavern | bakery | well | field | market
     owner: str | None = None  # npc id for homes
 
-    def describe(self, world: "World") -> str:
-        here = [n.name for n in world.npcs if n.at_place == self.id]
+    def describe(self, world: "World", viewer=None) -> str:
+        """The place in words. Occupants are listed only if `viewer` can see the place."""
+        can_see = viewer is None or viewer.at_place == self.id or (
+            abs(viewer.x - self.anchor[0]) + abs(viewer.y - self.anchor[1]) <= VISION
+        )
+        here = [n.name for n in world.npcs if n.at_place == self.id and (viewer is None or n.id in viewer.sees)] if can_see else []
         base = {
             "tavern": "warm, serves food and drink",
             "bakery": "sells bread in the morning",
@@ -59,6 +65,9 @@ class Place:
             base += "; " + ", ".join(here) + (" is" if len(here) == 1 else " are") + " here"
         if self.kind == "field" and world.weather == "raining":
             base += "; muddy in the rain"
+        state = world.place_state.get(self.id)
+        if state:
+            base += f"; {state}"
         return base
 
 
@@ -67,8 +76,11 @@ class Clock:
     minutes: float = 7 * 60.0  # start 07:00
     seconds_per_game_hour: float = 15.0  # a full day in 6 real seconds * 60 = 6 min
 
-    def tick(self, dt: float) -> None:
+    def tick(self, dt: float) -> bool:
+        """Advance; returns True when a new day has started."""
+        before = self.minutes
         self.minutes = (self.minutes + dt / self.seconds_per_game_hour * 60.0) % (24 * 60)
+        return self.minutes < before
 
     @property
     def hour(self) -> float:
@@ -118,7 +130,10 @@ class World:
         self.by_id: dict = {}
         self.events: list[str] = []
         self.weather: str = "clear"
-        self.news: list[dict] = []  # {"text", "at", "since"}
+        self.news: list[dict] = []  # {"text", "since", "knows", "subject"?}
+        self.place_state: dict[str, str] = {}  # place id -> transient condition ("on fire", "closed after the fire")
+        self.day: int = 1
+        self.chronicle: list[dict] = []  # the full linear history: {"day", "hhmm", "text", "kind"}
         self._index_places()
 
     # ------------------------------------------------------------------ places
@@ -219,9 +234,15 @@ class World:
         return p
 
     # ------------------------------------------------------------------ events
-    def log(self, text: str) -> None:
+    def log(self, text: str, kind: str = "event") -> None:
         self.events.append(f"[{self.clock.hhmm()}] {text}")
         del self.events[:-40]
+        self.chronicle.append({"day": self.day, "hhmm": self.clock.hhmm(), "text": text, "kind": kind})
+        del self.chronicle[:-3000]
+
+    def new_day(self) -> None:
+        self.day += 1
+        self.chronicle.append({"day": self.day, "hhmm": "00:00", "text": f"Day {self.day} begins", "kind": "day"})
 
     def snapshot_map(self) -> dict:
         return {

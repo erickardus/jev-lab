@@ -210,8 +210,13 @@ the browser — and you, a traveler they notice, walking around by click. Every 
 each idle villager gets one `Choice` over the actions available right now — described in
 words, never coordinates — batched into one Jev request. Rain comes and goes; news spreads
 from villager to villager when a Jev `Noul` says they'd pass it on. Code owns the map,
-paths, clock, and effects; Claude (Haiku) writes the dialogue when two of them meet. Click
-a villager to see every option Jev was offered and its probability. About 7¢ per real hour.
+paths, clock, and effects; Claude (Haiku) writes the dialogue when two of them meet — and
+Jev reads the lines to decide whether a promise was really made or a rumor really told,
+so conversations produce commitments, grudges, and reputations. Villagers know only what
+they've seen, remember what mattered for the whole run, and change: each night Jev judges
+how the day changed them and their traits drift. You can talk to any villager by typing;
+Jev decides whether they believe you and whether they agreed to what you asked. A chronicle
+tab holds the full history. About 7¢ per real hour.
 
 ```
 [11:40] Bram → eat_at_tavern (0.70)
