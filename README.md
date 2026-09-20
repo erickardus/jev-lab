@@ -158,6 +158,30 @@ Guard rejected this edit. Rule(s) violated:
 Rewrite the change so it complies, then retry.
 ```
 
+### [`retro/`](examples/retro/) — grade the session after it ends
+
+A `SessionEnd` hook. Code parses the transcript and counts loops, re-reads, failed
+edits, and how long orientation took; Jev grades the opening prompt on a rubric,
+classifies every follow-up and, for a correction, says whose fault it was: the prompt
+(`prompt_missing_info`), the repo's documentation (`repo_knowledge`), or the agent
+(`agent_error`). Findings land in three sections, one per owner, and a `SessionStart`
+hook has Claude mention last session's findings at the top of the next one. Optionally
+one Sonnet call drafts the `CLAUDE.md` paragraph or the prompt rewrite. `--trends`
+aggregates the ledger across sessions.
+
+```
+**Prompt 3.2/10 · Agent 4.1/10 · Outcome 7.7/10**
+## Your prompt
+- 🟠 The prompt did not say where — where 0.30
+## Repo context
+- 🔴 A correction carried repo knowledge that is not written down — “...you regenerate
+  them with the invoice-fixtures skill, that's how we always do it here” (cause repo_knowledge 0.75)
+## The agent
+- 🔴 Claude got lost — directedness 0.6/2; 13 explore steps before the first edit
+```
+
+Claude Code skill: `/retro`.
+
 ### [`village/`](examples/village/) — a tiny world whose people are driven by Jev
 
 Six villagers with roles, traits, needs, and memories, on a top-down map in the browser.

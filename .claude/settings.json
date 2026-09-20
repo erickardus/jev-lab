@@ -34,6 +34,42 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": [
+              "run",
+              "--project",
+              "${CLAUDE_PROJECT_DIR}",
+              "${CLAUDE_PROJECT_DIR}/examples/retro/retro.py"
+            ],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": [
+              "run",
+              "--project",
+              "${CLAUDE_PROJECT_DIR}",
+              "${CLAUDE_PROJECT_DIR}/examples/retro/retro.py",
+              "--session-start"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
