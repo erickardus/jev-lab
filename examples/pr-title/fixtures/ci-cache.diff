@@ -1,0 +1,26 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index aabbccd..1122334 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -10,12 +10,28 @@ jobs:
+   test:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - uses: astral-sh/setup-uv@v5
++        with:
++          enable-cache: true
++          cache-dependency-glob: "uv.lock"
+       - run: uv sync --frozen
+       - run: uv run pytest -q
+-      - run: uv run ruff check .
++
++  lint:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: astral-sh/setup-uv@v5
++        with:
++          enable-cache: true
++          cache-dependency-glob: "uv.lock"
++      - run: uv run ruff check .

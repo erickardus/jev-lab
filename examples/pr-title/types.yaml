@@ -1,0 +1,156 @@
+# PR title taxonomy: the label set, judged by Jev, composed by code.
+#
+# Each entry under `types` becomes one option of a single Choice question over
+# the diff. Jev reads criteria literally, so `description` states what the
+# change IS, and `not` names the neighbours it keeps being confused with. The
+# boundaries between feat/fix/refactor/chore are where every wrong answer comes
+# from, so most of the wording here is about telling them apart.
+#
+# Everything else -- the scope, the `!`, the final string, when to leave the
+# title alone -- is code.
+
+version: 1
+
+# Conventional Commits 1.0.0. Replace wholesale for a different vocabulary;
+# nothing in the code knows these particular names.
+types:
+  feat:
+    description: >-
+      Adds a capability that did not exist before: a new endpoint, command,
+      flag, screen, field, or a new behavior a user or caller can now invoke.
+    not: >-
+      Not a change that makes existing behavior correct (that is fix), and not
+      a change that only reorganizes code that already worked (that is refactor).
+    label: "type: feature"
+
+  fix:
+    description: >-
+      Corrects behavior that was wrong: a crash, an incorrect result, a race, a
+      security hole, an off-by-one, a case that was not handled.
+    not: >-
+      Not a new capability (that is feat), and not a change that only makes
+      correct code tidier or faster (that is refactor or perf).
+
+    label: "type: bug"
+
+  perf:
+    description: >-
+      Makes existing, already-correct behavior faster or lighter: fewer queries,
+      less memory, a cache, a better algorithm for the same output.
+    not: >-
+      The observable result must be unchanged. If the output changes, it is feat
+      or fix.
+    label: "type: performance"
+
+  refactor:
+    description: >-
+      Restructures code without changing what it does: renames, extracts,
+      moves, deduplicates, changes internal types, splits a file.
+    not: >-
+      Not a change that alters any observable behavior, output, or public
+      signature. If a caller could notice, it is feat, fix, or perf.
+    label: "type: refactor"
+
+  docs:
+    description: >-
+      Changes documentation only: README, guides, comments, docstrings,
+      changelogs, examples in prose.
+    not: >-
+      Not a change to code that runs. A docstring edit that comes along with a
+      code change is not a docs PR.
+    label: "type: docs"
+
+  test:
+    description: >-
+      Adds or changes tests, fixtures, mocks, or test helpers, and nothing that
+      ships to users.
+    not: >-
+      A PR that fixes a bug and adds a test for it is fix, not test. This is for
+      changes where the tests are the point.
+    label: "type: tests"
+
+  build:
+    description: >-
+      Changes dependencies, the build system, or packaging: version bumps in a
+      manifest or lockfile, a Dockerfile, bundler or compiler configuration.
+    not: >-
+      Not the project's own CI pipeline definition (that is ci).
+    label: "type: build"
+    # Dependabot opens its PRs as `chore(deps):`, which is a defensible reading.
+    # A prefix listed here is left alone when it is already on the title, so the
+    # Action does not churn every bot PR to say the same thing differently.
+    accept_existing: [chore]
+
+  ci:
+    description: >-
+      Changes continuous integration or delivery configuration: workflow files,
+      pipeline definitions, release automation, deployment scripts.
+    not: >-
+      Not application code, and not dependency versions used by the application
+      itself (that is build).
+    label: "type: ci"
+
+  style:
+    description: >-
+      Changes only formatting or cosmetics: whitespace, quotes, import order,
+      linter-driven reformatting, with no change to what the code does.
+    not: >-
+      Not a rename or a restructure (that is refactor).
+    label: "type: style"
+
+  chore:
+    description: >-
+      Routine maintenance that fits none of the other types: config files,
+      metadata, ignore files, licence, housekeeping, generated file updates.
+    not: >-
+      Use this only when nothing else fits; it is the fallback, not the default.
+    label: "type: chore"
+
+# A breaking change gets a `!` before the colon: feat(api)!: ...
+breaking:
+  description: >-
+    The change removes or alters something existing callers depend on, so code,
+    configuration, or data that worked before will stop working without being
+    changed too.
+  criteria:
+    true: >-
+      A public function, endpoint, CLI flag, config key, schema column, or
+      response field is removed, renamed, or given different required arguments
+      or different meaning; or a default changes in a way that alters existing
+      installations.
+    false: >-
+      Everything existing keeps working: additions are new and optional,
+      renames are internal only, or a compatibility path is kept.
+  # A PR body saying BREAKING CHANGE is believed in code, without asking.
+  body_markers: ["BREAKING CHANGE", "BREAKING-CHANGE"]
+
+# Does the title's own wording describe the change? Low means "the prefix is
+# right but the sentence after it is still useless".
+title_describes:
+  criteria:
+    true: >-
+      Someone who reads only the title would know roughly what changed and
+      where, because it names the behavior, the component, or the problem.
+    false: >-
+      It is generic filler such as "update", "fixes", "changes", "WIP", a bare
+      branch name, or a ticket id with no words.
+
+# Map a path prefix to the scope used in `type(scope):`. First match wins.
+# Without a match the scope is the deepest directory all changed files share.
+# Test files are ignored while choosing a scope whenever the PR also touches
+# non-test files, because tests mirror the tree they test and would otherwise
+# split every scope in two.
+scope_map:
+  ".github/": ci
+  "jevlab/": core
+  "examples/": null      # null: use the next path segment (examples/pr-risk -> pr-risk)
+  "src/": null           # src/billing/render.py -> billing
+  "tests/": null
+  "test/": null
+
+# Policy. Tune on your own PRs.
+thresholds:
+  apply: 0.55          # p(top type) below this: report, never rewrite the title
+  margin: 0.15         # top type must beat the runner-up by this much to rewrite
+  breaking: 0.70       # p(breaking) at or above this adds the `!`
+  title_describes: 0.45  # p(the title's own words describe the change) below this is worth saying

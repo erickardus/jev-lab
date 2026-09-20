@@ -158,6 +158,25 @@ Guard rejected this edit. Rule(s) violated:
 Rewrite the change so it complies, then retry.
 ```
 
+### [`pr-title/`](examples/pr-title/) — catalogue the PR, rewrite its title
+
+A GitHub Action. One `Choice` over the diff picks the Conventional Commits type, a
+`Noul` decides whether it breaks callers, and code does the rest: the scope from the
+changed paths, the `!`, and the final string. Two thresholds decide whether to touch
+the title, so an ambiguous PR gets a report instead of a coin toss, and a prefix the
+author already got right is left alone.
+
+```
+| ✅ | 1.00 | Refactor session middleware to support API tokens | feat!: Refactor session middleware ... |
+| ⚠️  | 0.47 | Reword checkout button and empty-cart messages    | (feat 0.47, style 0.32: left alone)    |
+| 🔒 | 1.00 | chore(deps): bump axios from 1.6.7 to 1.6.8      | unchanged; `chore` accepted for `build` |
+| ✅ | 1.00 | fix nullpointer                                  | fix(billing): nullpointer               |
+```
+
+The first row is the point: the author called it a refactor, the diff adds bearer-token
+auth and a table, so it is a `feat`, and `require_role` stops falling through to the
+anonymous user, so it is breaking. $0.00008 per PR.
+
 ### [`retro/`](examples/retro/) — grade the session after it ends
 
 A `SessionEnd` hook. Code parses the transcript and counts loops, re-reads, failed

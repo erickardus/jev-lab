@@ -1,0 +1,32 @@
+diff --git a/src/billing/render_invoice.py b/src/billing/render_invoice.py
+index 3a1f2b4..7c9d0e1 100644
+--- a/src/billing/render_invoice.py
++++ b/src/billing/render_invoice.py
+@@ -42,9 +42,13 @@ def render_invoice(invoice: Invoice) -> str:
+     lines.append(f"Invoice {invoice.number}")
+     lines.append(f"Issued {invoice.issued_at:%Y-%m-%d}")
+ 
+-    contact = invoice.billing_contact
+-    lines.append(f"Bill to: {contact.name} <{contact.email}>")
++    contact = invoice.billing_contact or invoice.account.owner
++    if contact is None:
++        raise InvoiceRenderError(f"invoice {invoice.number} has no contact and no account owner")
++    lines.append(f"Bill to: {contact.name} <{contact.email}>")
+ 
+     for item in invoice.line_items:
+         lines.append(f"  {item.description:40} {item.amount_cents / 100:>10.2f}")
+     return "\n".join(lines)
+diff --git a/tests/billing/test_render_invoice.py b/tests/billing/test_render_invoice.py
+index 8b2c3d4..9e5f6a7 100644
+--- a/tests/billing/test_render_invoice.py
++++ b/tests/billing/test_render_invoice.py
+@@ -30,3 +30,13 @@ def test_renders_line_items():
+     out = render_invoice(invoice)
+     assert "Widget" in out
+     assert "12.00" in out
++
++
++def test_falls_back_to_account_owner_when_no_billing_contact():
++    invoice = make_invoice(billing_contact=None)
++    out = render_invoice(invoice)
++    assert invoice.account.owner.email in out
