@@ -1,0 +1,50 @@
+diff --git a/src/api/reports.py b/src/api/reports.py
+index 1122334..5566778 100644
+--- a/src/api/reports.py
++++ b/src/api/reports.py
+@@ -1,6 +1,8 @@
++import csv
++import io
+ from fastapi import APIRouter, Query
+-from fastapi.responses import JSONResponse
++from fastapi.responses import JSONResponse, StreamingResponse
+ 
+ router = APIRouter()
+ 
+@@ -14,6 +16,20 @@ def usage_report(account_id: str, start: date, end: date):
+     rows = query_usage(account_id, start, end)
+     return JSONResponse({"rows": [r.as_dict() for r in rows]})
+ 
++
++@router.get("/reports/usage.csv")
++def usage_report_csv(account_id: str, start: date, end: date):
++    """Same data as /reports/usage, as a CSV attachment."""
++    rows = query_usage(account_id, start, end)
++    buf = io.StringIO()
++    writer = csv.DictWriter(buf, fieldnames=UsageRow.columns())
++    writer.writeheader()
++    for r in rows:
++        writer.writerow(r.as_dict())
++    buf.seek(0)
++    return StreamingResponse(
++        buf, media_type="text/csv",
++        headers={"Content-Disposition": f'attachment; filename="usage-{start}-{end}.csv"'},
++    )
+diff --git a/src/web/components/ReportToolbar.tsx b/src/web/components/ReportToolbar.tsx
+index 2233445..6677889 100644
+--- a/src/web/components/ReportToolbar.tsx
++++ b/src/web/components/ReportToolbar.tsx
+@@ -8,6 +8,14 @@ export function ReportToolbar({ accountId, range }: Props) {
+   return (
+     <div className="toolbar">
+       <RangePicker value={range} onChange={setRange} />
++      <a
++        className="btn btn-secondary"
++        href={`/api/reports/usage.csv?account_id=${accountId}&start=${range.start}&end=${range.end}`}
++        download
++      >
++        Download CSV
++      </a>
+     </div>
+   );
+ }

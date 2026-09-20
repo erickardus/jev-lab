@@ -158,6 +158,51 @@ Guard rejected this edit. Rule(s) violated:
 Rewrite the change so it complies, then retry.
 ```
 
+### [`pr-title/`](examples/pr-title/) — catalogue the PR, rewrite its title
+
+A GitHub Action. One `Choice` over the diff picks the Conventional Commits type, a
+`Noul` decides whether it breaks callers, and code does the rest: the scope from the
+changed paths, the `!`, and the final string. Two thresholds decide whether to touch
+the title, so an ambiguous PR gets a report instead of a coin toss, and a prefix the
+author already got right is left alone.
+
+```
+| ✅ | 1.00 | Refactor session middleware to support API tokens | feat!: Refactor session middleware ... |
+| ⚠️  | 0.47 | Reword checkout button and empty-cart messages    | (feat 0.47, style 0.32: left alone)    |
+| 🔒 | 1.00 | chore(deps): bump axios from 1.6.7 to 1.6.8      | unchanged; `chore` accepted for `build` |
+| ✅ | 1.00 | fix nullpointer                                  | fix(billing): nullpointer               |
+```
+
+The first row is the point: the author called it a refactor, the diff adds bearer-token
+auth and a table, so it is a `feat`, and `require_role` stops falling through to the
+anonymous user, so it is breaking. $0.00008 per PR.
+
+### [`retro/`](examples/retro/) — grade the session after it ends
+
+A `SessionEnd` hook. Code parses the transcript and counts loops, re-reads, failed
+edits, and how long orientation took; Jev grades the opening prompt on a rubric,
+classifies every follow-up and, for a correction, says whose fault it was: the prompt
+(`prompt_missing_info`), the repo's documentation (`repo_knowledge`), or the agent
+(`agent_error`). Findings land in three sections, one per owner, and a `SessionStart`
+hook has Claude mention last session's findings at the top of the next one. Optionally
+one Sonnet call drafts the `CLAUDE.md` paragraph or the prompt rewrite. `--trends`
+aggregates the ledger across sessions.
+
+```
+**Prompt 4.2/10 · Agent 4.3/10 · Outcome 6.2/10**
+## Your prompt
+- 🟠 The prompt did not say where — where 0.10
+## Repo context
+- 🔴 A correction carried repo knowledge that is not written down — “...you regenerate
+  them with the invoice-fixtures skill, that's how we always do it here” (cause repo_knowledge 0.98)
+## The agent
+- 🔴 Claude got lost — directedness 0.8/2; 13 explore steps before the first edit
+```
+
+One report costs 6 Jev requests, ~4.7k input tokens, $0.0002, and 1.6 s.
+
+Claude Code skill: `/retro`.
+
 ### [`village/`](examples/village/) — a tiny world whose people are driven by Jev
 
 Six villagers with roles, traits, needs, and memories, on a top-down map in the browser.

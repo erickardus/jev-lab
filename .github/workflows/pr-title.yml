@@ -1,0 +1,48 @@
+# Catalogue every pull request: pick its Conventional Commits type with Jev and
+# rewrite the title. See examples/pr-title/README.md.
+#
+# `pull_request_target` runs in the base repository, so the token can write and
+# PRs from forks work. That event is dangerous when a workflow builds or runs
+# the PR's code, because the PR author controls it. This one never does: the
+# checkout below takes the BASE branch, and the diff is read through the API.
+# Do not add a step that checks out `github.event.pull_request.head.sha` here.
+
+name: PR title
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize]
+
+# Editing the title fires `edited`. GitHub does not start a new run for events
+# caused by GITHUB_TOKEN, so this does not loop; the script is also idempotent,
+# leaving an already-correct title untouched. Swapping in a PAT would loop.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  catalogue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4          # base branch, NOT the PR head
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Classify and retitle
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$TYPESAFE_API_KEY" ]; then
+            echo "::notice::TYPESAFE_API_KEY is not set; skipping PR title cataloguing."
+            exit 0
+          fi
+          uv run --frozen examples/pr-title/pr_title.py "$PR" \
+            --repo "$GITHUB_REPOSITORY" --apply --labels
